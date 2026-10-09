@@ -23,25 +23,25 @@
 <style>
 /* ============================================================
    Barてきな？会員管理 — design tokens
-   Layout concept: 深夜のダーツ台スコアボード。黒を背景に、看板の
-   ネオンピンクとアーケードのブラス(真鍮)を光らせ、スタンプ進捗は
-   ダーツボードの同心円リングで表現する。
+   Layout concept: 店舗ロゴ(黒いダーツボード×ネオンピンクの看板)を
+   そのままアプリの世界観に。漆黒の背景にマゼンタピンクのネオンを
+   光らせ、スタンプ進捗はダーツボードの同心円リングで表現する。
    ============================================================ */
 :root {
   color-scheme: dark;
 
-  /* Color — フェニックス(炎)をイメージしたレーティングカード配色 */
-  --bg: #0d0705;
-  --bg-elev: #1d1108;
-  --bg-elev-2: #2c190b;
-  --line: #4a2a14;
-  --line-soft: #35200e;
-  --fg: #fdf0e4;
-  --fg-dim: #caa283;
-  --fg-faint: #8f6b4e;
-  --pink: #ff4b1f;
-  --pink-bright: #ff8a3d;
-  --pink-glow: rgba(255,75,31,0.42);
+  /* Color — ロゴ(黒背景×ネオンマゼンタ×白)に合わせた配色 */
+  --bg: #0a0810;
+  --bg-elev: #15101d;
+  --bg-elev-2: #1e1628;
+  --line: #352a42;
+  --line-soft: #251d30;
+  --fg: #fdf6fb;
+  --fg-dim: #c9b8cc;
+  --fg-faint: #8d7c93;
+  --pink: #ec3aa8;
+  --pink-bright: #ff5fc8;
+  --pink-glow: rgba(236,58,168,0.42);
   --gold: #e8b43a;
   --gold-bright: #ffce63;
   --good: #35d08c;
@@ -75,9 +75,9 @@ body::before {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(640px 420px at 18% -6%, rgba(255,75,31,0.16), transparent 60%),
+    radial-gradient(640px 420px at 18% -6%, rgba(236,58,168,0.16), transparent 60%),
     radial-gradient(520px 360px at 100% 10%, rgba(232,180,58,0.10), transparent 55%),
-    radial-gradient(900px 600px at 50% 120%, rgba(255,75,31,0.08), transparent 60%);
+    radial-gradient(900px 600px at 50% 120%, rgba(236,58,168,0.08), transparent 60%);
 }
 /* Barてきな？ ロゴ(ダーツボード×シルエット)を画面全体にうすく敷き詰めるウォーターマーク */
 body::after {
@@ -111,11 +111,11 @@ header.top {
   position: sticky;
   top: env(safe-area-inset-top, 0px);
   z-index: 20;
-  background: #fff;
-  border-bottom: 1px solid #ececec;
+  background: #000;
+  border-bottom: 1px solid var(--line);
   padding: 16px 18px 0;
   border-radius: 0 0 18px 18px;
-  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
 }
 
 .brand-row {
@@ -132,9 +132,9 @@ header.top {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(145deg, #ff4d52, #e2232b);
-  border: none;
-  box-shadow: 0 3px 12px rgba(226,35,43,0.4);
+  background: #000;
+  border: 2px solid var(--pink);
+  box-shadow: 0 0 14px var(--pink-glow);
 }
 .brand-mark svg { width: 26px; height: 26px; display: block; }
 
@@ -142,7 +142,7 @@ header.top {
 .brand-text .eyebrow {
   font-size: 10.5px;
   letter-spacing: 0.16em;
-  color: #e2232b;
+  color: var(--pink-bright);
   text-transform: uppercase;
   font-weight: 700;
 }
@@ -152,18 +152,18 @@ header.top {
   font-weight: 900;
   letter-spacing: 0.01em;
   line-height: 1.15;
-  color: #1c1c1c;
+  color: var(--fg);
 }
-.brand-text h1 .accent { color: #e2232b; }
+.brand-text h1 .accent { color: var(--pink-bright); }
 
 .lock-btn {
   flex: none;
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: 1px solid #e5e5e5;
-  background: #f4f4f4;
-  color: #888;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--fg-faint);
   font-size: 15px;
   cursor: pointer;
   display: flex;
@@ -171,9 +171,9 @@ header.top {
   justify-content: center;
 }
 .lock-btn.unlocked {
-  border-color: #e2232b;
-  color: #e2232b;
-  box-shadow: 0 0 10px rgba(226,35,43,0.3);
+  border-color: var(--pink);
+  color: var(--pink-bright);
+  box-shadow: 0 0 10px var(--pink-glow);
 }
 .pin-input {
   text-align: center;
@@ -182,21 +182,21 @@ header.top {
   letter-spacing: 0.3em;
 }
 
-/* scoreboard strip — Phoenix-style red block with white rating rings */
+/* scoreboard strip — logo-matched black×ネオンピンクの看板風ブロック */
 .scoreboard {
   margin-top: 16px;
   display: flex;
   justify-content: space-around;
   align-items: center;
   gap: 8px;
-  background: linear-gradient(170deg, #ff4d52, #e2232b 75%);
-  border: none;
+  background: linear-gradient(170deg, #1a0a16, #000 75%);
+  border: 1px solid var(--pink);
   border-radius: 16px;
   padding: 16px 8px 18px;
-  box-shadow: 0 6px 16px rgba(226,35,43,0.35);
+  box-shadow: 0 0 20px var(--pink-glow);
 }
 .score-tile {
-  background: rgba(0,0,0,0.08);
+  background: rgba(236,58,168,0.1);
   border: 2px solid rgba(255,255,255,0.85);
   border-radius: 50%;
   width: 70px;
@@ -212,7 +212,7 @@ header.top {
   font-size: 19px;
   line-height: 1;
   color: #fff;
-  text-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  text-shadow: 0 0 8px var(--pink-glow);
 }
 .score-tile .k {
   margin-top: 4px;
@@ -228,8 +228,8 @@ nav.tabs {
   display: flex;
   gap: 6px;
   margin: 14px 0 12px;
-  background: #f2f2f2;
-  border: 1px solid #e5e5e5;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 4px;
 }
@@ -238,7 +238,7 @@ nav.tabs button {
   appearance: none;
   border: none;
   background: transparent;
-  color: #888;
+  color: var(--fg-faint);
   padding: 9px 4px;
   border-radius: 9px;
   font-family: inherit;
@@ -248,9 +248,9 @@ nav.tabs button {
   transition: background 0.15s, color 0.15s;
 }
 nav.tabs button.active {
-  background: linear-gradient(135deg, #ff4d52, #e2232b);
+  background: linear-gradient(135deg, var(--pink-bright), var(--pink));
   color: #fff;
-  box-shadow: 0 2px 10px rgba(226,35,43,0.35);
+  box-shadow: 0 2px 10px var(--pink-glow);
 }
 
 main { flex: 1; padding: 4px 16px 110px; }
@@ -302,8 +302,8 @@ ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-di
 .tier-section-title.tier-regular { color: var(--fg-dim); }
 
 .member-card {
-  --red: #e2232b;
-  --red-bright: #ff4d52;
+  --red: var(--pink);
+  --red-bright: var(--pink-bright);
   position: relative;
   background: #fff;
   border: 1px solid #ececec;
@@ -319,7 +319,7 @@ ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-di
 }
 .member-card:active { transform: scale(0.99); }
 .member-card.tier-gold { --red: #c9972c; --red-bright: #ffce63; }
-.member-card.tier-vip { --red: #8a1030; --red-bright: #ff3d6b; }
+.member-card.tier-vip { --red: #6a0e4a; --red-bright: #ff3dd4; }
 
 /* rating-card corner ribbon showing the tier, like an arcade rating card */
 .member-card::before {
@@ -414,8 +414,8 @@ ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-di
 
 /* ---------- Phoenix-style rating card (member detail) ---------- */
 .phoenix-card {
-  --red: #e2232b;
-  --red-bright: #ff4d52;
+  --red: var(--pink);
+  --red-bright: var(--pink-bright);
   position: relative;
   border-radius: 18px;
   overflow: hidden;
@@ -424,7 +424,7 @@ ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-di
   box-shadow: 0 10px 26px rgba(0,0,0,0.4);
 }
 .phoenix-card.tier-gold { --red: #c9972c; --red-bright: #ffce63; }
-.phoenix-card.tier-vip { --red: #8a1030; --red-bright: #ff3d6b; }
+.phoenix-card.tier-vip { --red: #6a0e4a; --red-bright: #ff3dd4; }
 
 .pc-head {
   position: relative;
@@ -541,11 +541,11 @@ ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-di
   height: 58px;
   border-radius: 50%;
   border: none;
-  background: linear-gradient(135deg, var(--pink-bright), var(--pink) 60%, #8f1f0c);
+  background: linear-gradient(135deg, var(--pink-bright), var(--pink) 60%, #4a0a36);
   color: #fff;
   font-size: 27px;
   line-height: 1;
-  box-shadow: 0 8px 22px rgba(255,75,31,0.45), 0 0 0 1px rgba(255,255,255,0.08) inset;
+  box-shadow: 0 8px 22px var(--pink-glow), 0 0 0 1px rgba(255,255,255,0.08) inset;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -596,7 +596,7 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; 
   max-width: 640px;
   max-height: 88vh;
   overflow-y: auto;
-  background: linear-gradient(180deg, #221307, #160d07);
+  background: linear-gradient(180deg, #1c1526, #0f0a16);
   border: 1px solid var(--line);
   border-bottom: none;
   border-radius: 20px 20px 0 0;
@@ -657,7 +657,7 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; 
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: linear-gradient(135deg, rgba(255,75,31,0.18), rgba(232,180,58,0.12));
+  background: linear-gradient(135deg, rgba(236,58,168,0.18), rgba(232,180,58,0.12));
   border: 1px solid var(--pink);
   border-radius: 20px;
   padding: 6px 8px 6px 14px;
@@ -714,7 +714,7 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; 
   cursor: pointer;
 }
 .reg-toggle.active {
-  background: linear-gradient(135deg, rgba(255,75,31,0.22), rgba(232,180,58,0.1));
+  background: linear-gradient(135deg, rgba(236,58,168,0.22), rgba(232,180,58,0.1));
   border-color: var(--pink);
   box-shadow: 0 0 0 1px var(--pink) inset;
 }
@@ -754,7 +754,7 @@ ul.reg-custom-list li .amt { color: var(--gold-bright); }
 
 .reg-total-box {
   margin-top: 18px;
-  background: linear-gradient(135deg, rgba(255,75,31,0.16), rgba(232,180,58,0.08));
+  background: linear-gradient(135deg, rgba(236,58,168,0.16), rgba(232,180,58,0.08));
   border: 1px solid var(--pink);
   border-radius: 14px;
   padding: 16px 18px;
@@ -781,7 +781,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   left: 50%;
   bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%) translateY(10px);
-  background: linear-gradient(135deg, #301a0d, #1c0f07);
+  background: linear-gradient(135deg, #26182e, #150d1c);
   border: 1px solid var(--pink);
   color: var(--fg);
   padding: 10px 18px;
@@ -908,7 +908,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
           <path d="M24 10 A14 14 0 0 1 24 38" fill="#140b06"/>
           <circle cx="24" cy="24" r="4.5" fill="#140b06"/>
           <circle cx="24" cy="24" r="4.5" fill="none" stroke="#f6eefb" stroke-width="1.6"/>
-          <circle cx="24" cy="24" r="1.6" fill="#ff4b1f"/>
+          <circle cx="24" cy="24" r="1.6" fill="#ec3aa8"/>
         </svg>
       </div>
       <div class="brand-text">

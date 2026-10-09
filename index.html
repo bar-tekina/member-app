@@ -1312,6 +1312,28 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     });
   }
 
+  function staffEntryUrl(code) {
+    return location.origin + location.pathname + location.search + "#" + code;
+  }
+  function renderStaffQR(code) {
+    const holder = document.getElementById("staffQrCanvas");
+    if (!holder) return;
+    holder.innerHTML = "";
+    if (!code || !window.QRCode) {
+      holder.innerHTML = `<p class="hint">QRコードを読み込めませんでした。</p>`;
+      return;
+    }
+    try {
+      new QRCode(holder, {
+        text: staffEntryUrl(code),
+        width: 200,
+        height: 200,
+        correctLevel: QRCode.CorrectLevel.H,
+      });
+    } catch (err) {
+      holder.innerHTML = `<p class="hint">QRコードの生成に失敗しました。</p>`;
+    }
+  }
   function openStaffCodeSheet() {
     const code = state.staffCode || "----";
     const html = `
@@ -1320,18 +1342,23 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
         <button class="sheet-close" id="closeStaffCode" aria-label="閉じる">×</button>
       </div>
       <div class="staffcode-display">${escapeHtml(code)}</div>
-      <p class="hint">スタッフはこのコードを一度入力する(またはこのコード付きのQRコードから開く)と、その端末では次回から自動で会計画面に入れます。</p>
+      <div class="qr-card-wrap">
+        <div id="staffQrCanvas" class="qr-card-canvas"></div>
+      </div>
+      <p class="hint">スタッフはこのコードを一度入力する(またはこのQRコードを読み取る)と、その端末では次回から自動で会計画面に入れます。QRコードは常に現在のコードと連動しているので、保存せずこの画面を都度開いて使ってください。</p>
       <button class="btn btn-danger" id="regenStaffCode" style="width:100%;">コードを再発行する(退職・交代したスタッフを締め出す)</button>
-      <p class="hint">再発行すると、これまでのコードやQRコードを使っていた端末は全てアクセスできなくなります。新しいコードのQRコードが必要な場合は作り直しますので教えてください。</p>
+      <p class="hint">再発行すると、これまでのコード・QRコードを使っていた端末は全てアクセスできなくなり、上のQRコードは自動的に新しいコードのものに切り替わります。</p>
     `;
     openSheet(html);
+    renderStaffQR(state.staffCode);
     document.getElementById("closeStaffCode").addEventListener("click", closeSheet);
     document.getElementById("regenStaffCode").addEventListener("click", async () => {
       const newCode = String(Math.floor(1000 + Math.random() * 9000));
       try {
         await state.db.collection("settings").doc("staffAccess").set({ code: newCode, updatedAt: Date.now() });
         showToast("新しいコードを発行しました: " + newCode);
-        closeSheet();
+        document.querySelector(".staffcode-display").textContent = newCode;
+        renderStaffQR(newCode);
       } catch (err) {
         showToast("更新に失敗しました");
       }

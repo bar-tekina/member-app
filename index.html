@@ -1,0 +1,3083 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Barてきな？ 会員管理</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon-v2.png">
+<link rel="icon" href="icons/icon-192-v2.png">
+<meta name="theme-color" content="#0a0810">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Barてきな？STAFF">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<!-- Firebase (compat API — chosen so the existing collection().doc().onSnapshot() style code ports unchanged) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<style>
+/* ============================================================
+   Barてきな？会員管理 — design tokens
+   Layout concept: 深夜のダーツ台スコアボード。黒を背景に、看板の
+   ネオンピンクとアーケードのブラス(真鍮)を光らせ、スタンプ進捗は
+   ダーツボードの同心円リングで表現する。
+   ============================================================ */
+:root {
+  color-scheme: dark;
+
+  /* Color — フェニックス(炎)をイメージしたレーティングカード配色 */
+  --bg: #0d0705;
+  --bg-elev: #1d1108;
+  --bg-elev-2: #2c190b;
+  --line: #4a2a14;
+  --line-soft: #35200e;
+  --fg: #fdf0e4;
+  --fg-dim: #caa283;
+  --fg-faint: #8f6b4e;
+  --pink: #ff4b1f;
+  --pink-bright: #ff8a3d;
+  --pink-glow: rgba(255,75,31,0.42);
+  --gold: #e8b43a;
+  --gold-bright: #ffce63;
+  --good: #35d08c;
+  --danger: #ff3b4a;
+  --danger-bright: #ff6f7a;
+
+  /* Type */
+  --display: "Bebas Neue", "Noto Sans JP", sans-serif;
+  --body: "Noto Sans JP", -apple-system, BlinkMacSystemFont, sans-serif;
+  --tnum: "Bebas Neue", "Noto Sans JP", sans-serif;
+  --logo-tile: url("logo_tile.webp");
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* ambient glow field behind everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(640px 420px at 18% -6%, rgba(255,75,31,0.16), transparent 60%),
+    radial-gradient(520px 360px at 100% 10%, rgba(232,180,58,0.10), transparent 55%),
+    radial-gradient(900px 600px at 50% 120%, rgba(255,75,31,0.08), transparent 60%);
+}
+/* Barてきな？ ロゴ(ダーツボード×シルエット)を画面全体にうすく敷き詰めるウォーターマーク */
+body::after {
+  content: "";
+  position: fixed;
+  inset: -300px;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--logo-tile);
+  background-size: 300px auto;
+  background-repeat: repeat;
+  mix-blend-mode: screen;
+  opacity: 0.38;
+  transform: rotate(-6deg);
+}
+
+.num { font-family: var(--tnum); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
+#app {
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Header / hero ---------- */
+header.top {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 20;
+  background: #fff;
+  border-bottom: 1px solid #ececec;
+  padding: 16px 18px 0;
+  border-radius: 0 0 18px 18px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #ff4d52, #e2232b);
+  border: none;
+  box-shadow: 0 3px 12px rgba(226,35,43,0.4);
+}
+.brand-mark svg { width: 26px; height: 26px; display: block; }
+
+.brand-text { flex: 1; min-width: 0; }
+.brand-text .eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  color: #e2232b;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.brand-text h1 {
+  margin: 1px 0 0;
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  color: #1c1c1c;
+}
+.brand-text h1 .accent { color: #e2232b; }
+
+.lock-btn {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #e5e5e5;
+  background: #f4f4f4;
+  color: #888;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lock-btn.unlocked {
+  border-color: #e2232b;
+  color: #e2232b;
+  box-shadow: 0 0 10px rgba(226,35,43,0.3);
+}
+.pin-input {
+  text-align: center;
+  font-family: var(--tnum);
+  font-size: 26px;
+  letter-spacing: 0.3em;
+}
+
+/* scoreboard strip — Phoenix-style red block with white rating rings */
+.scoreboard {
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(170deg, #ff4d52, #e2232b 75%);
+  border: none;
+  border-radius: 16px;
+  padding: 16px 8px 18px;
+  box-shadow: 0 6px 16px rgba(226,35,43,0.35);
+}
+.score-tile {
+  background: rgba(0,0,0,0.08);
+  border: 2px solid rgba(255,255,255,0.85);
+  border-radius: 50%;
+  width: 70px;
+  height: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+}
+.score-tile .v {
+  font-family: var(--tnum);
+  font-size: 19px;
+  line-height: 1;
+  color: #fff;
+  text-shadow: 0 2px 6px rgba(0,0,0,0.25);
+}
+.score-tile .k {
+  margin-top: 4px;
+  font-size: 7.5px;
+  color: rgba(255,255,255,0.9);
+  letter-spacing: 0.04em;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* tabs */
+nav.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 14px 0 12px;
+  background: #f2f2f2;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  padding: 4px;
+}
+nav.tabs button {
+  flex: 1;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: #888;
+  padding: 9px 4px;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+nav.tabs button.active {
+  background: linear-gradient(135deg, #ff4d52, #e2232b);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(226,35,43,0.35);
+}
+
+main { flex: 1; padding: 4px 16px 110px; }
+
+/* ---------- Search / inputs ---------- */
+.search-row { margin-bottom: 14px; }
+input, textarea {
+  width: 100%;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  color: var(--fg);
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-family: inherit;
+  font-size: 15px;
+  outline: none;
+}
+input::placeholder, textarea::placeholder { color: var(--fg-faint); }
+input:focus, textarea:focus, button:focus-visible {
+  border-color: var(--pink);
+  box-shadow: 0 0 0 3px var(--pink-glow);
+}
+
+/* ---------- Empty state ---------- */
+.empty { text-align: center; padding: 64px 16px; color: var(--fg-dim); }
+.empty .glyph { margin-bottom: 14px; opacity: 0.9; }
+.empty .glyph svg { width: 46px; height: 46px; }
+.empty p { margin: 4px 0; font-size: 13.5px; line-height: 1.7; }
+
+/* ---------- Member list ---------- */
+ul.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+
+.tier-section { margin-bottom: 20px; }
+.tier-section:last-child { margin-bottom: 0; }
+.tier-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 3px 9px;
+  font-family: var(--tnum);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.tier-section-title .count { font-size: 10.5px; color: var(--fg-faint); font-weight: 500; letter-spacing: 0.02em; }
+.tier-section-title.tier-vip { color: var(--pink-bright); text-shadow: 0 0 10px var(--pink-glow); }
+.tier-section-title.tier-gold { color: var(--gold-bright); text-shadow: 0 0 10px rgba(232,180,58,0.3); }
+.tier-section-title.tier-regular { color: var(--fg-dim); }
+
+.member-card {
+  --red: #e2232b;
+  --red-bright: #ff4d52;
+  position: relative;
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.28);
+  transition: transform 0.1s;
+}
+.member-card:active { transform: scale(0.99); }
+.member-card.tier-gold { --red: #c9972c; --red-bright: #ffce63; }
+.member-card.tier-vip { --red: #8a1030; --red-bright: #ff3d6b; }
+
+/* rating-card corner ribbon showing the tier, like an arcade rating card */
+.member-card::before {
+  content: attr(data-tier-label);
+  position: absolute;
+  top: 9px;
+  right: -34px;
+  width: 130px;
+  transform: rotate(40deg);
+  text-align: center;
+  font-family: var(--tnum);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 2.5px 0;
+  background: linear-gradient(135deg, var(--red-bright), var(--red));
+  color: #fff;
+  z-index: 1;
+}
+
+.card-top { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+
+.avatar-ring {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  padding: 2px;
+  background: conic-gradient(var(--red-bright) var(--pct, 40%), #eee 0);
+}
+.avatar-ring .avatar-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--red);
+}
+
+.member-info { flex: 1; min-width: 0; }
+.member-info .name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.member-info .name { font-weight: 700; font-size: 15px; color: #1c1c1c; }
+.member-info .meta { font-size: 11.5px; color: #777; margin-top: 3px; }
+.bday-badge { font-size: 12px; }
+
+/* ---------- Membership tier ---------- */
+.tier-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--tnum);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  padding: 2px 7px 1px;
+  border-radius: 20px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.tier-badge.tier-regular { background: var(--bg-elev-2); color: var(--fg-dim); border: 1px solid var(--line); }
+.tier-badge.tier-gold {
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold));
+  color: #2a1a04;
+  box-shadow: 0 0 10px rgba(232,180,58,0.4);
+}
+.tier-badge.tier-vip {
+  background: linear-gradient(135deg, var(--pink-bright), var(--pink) 55%, var(--gold-bright));
+  color: #fff;
+  box-shadow: 0 0 12px var(--pink-glow);
+}
+.member-card .tier-badge.tier-regular { background: #f2f2f2; color: #888; border-color: #e5e5e5; }
+.tier-row { display: flex; align-items: center; gap: 9px; margin: -2px 0 16px; flex-wrap: wrap; }
+.tier-row .tier-next { font-size: 11.5px; color: var(--fg-dim); }
+
+.member-right {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(150deg, var(--red-bright), var(--red));
+  box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+}
+.member-right .pts { font-family: var(--tnum); font-size: 15px; color: #fff; line-height: 1.05; }
+.member-right .pts-label { font-size: 6.5px; color: rgba(255,255,255,0.85); letter-spacing: 0.06em; }
+
+/* ---------- Phoenix-style rating card (member detail) ---------- */
+.phoenix-card {
+  --red: #e2232b;
+  --red-bright: #ff4d52;
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.4);
+}
+.phoenix-card.tier-gold { --red: #c9972c; --red-bright: #ffce63; }
+.phoenix-card.tier-vip { --red: #8a1030; --red-bright: #ff3d6b; }
+
+.pc-head {
+  position: relative;
+  background: linear-gradient(170deg, var(--red-bright), var(--red) 75%);
+  padding: 20px 16px 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.pc-head::after {
+  content: attr(data-tier-label);
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--tnum);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: rgba(255,255,255,0.85);
+}
+.pc-side-btn {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.14);
+  border: 1px solid rgba(255,255,255,0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.pc-side-btn.pc-chevron { font-size: 17px; font-weight: 400; }
+.pc-rating-ring {
+  flex: none;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.9);
+  background: rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.pc-rating-label { font-size: 9.5px; letter-spacing: 0.14em; color: #fff; opacity: 0.9; }
+.pc-rating-num { font-family: var(--tnum); font-size: 34px; color: #fff; line-height: 1.05; margin-top: 2px; text-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+
+.pc-profile {
+  background: var(--bg-elev);
+  padding: 0 16px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.pc-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  margin-top: -32px;
+  background: var(--bg-elev-2);
+  border: 3px solid var(--bg-elev);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 16px;
+  color: var(--red);
+}
+.pc-name { font-size: 13.5px; font-weight: 700; color: var(--fg); margin-top: 2px; }
+.pc-sub { font-size: 11px; color: var(--fg-dim); }
+
+.pc-stats-row {
+  background: var(--bg-elev);
+  display: flex;
+  justify-content: space-around;
+  gap: 6px;
+  padding: 10px 14px 18px;
+}
+.pc-stat { display: flex; flex-direction: column; align-items: center; gap: 7px; flex: 1; min-width: 0; }
+.pc-stat-circle {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: linear-gradient(150deg, var(--red-bright), var(--red));
+  color: #fff;
+  font-family: var(--tnum);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.1;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  word-break: break-word;
+}
+.pc-stat-label { font-size: 9.5px; color: var(--fg-dim); text-align: center; letter-spacing: 0.02em; }
+
+/* ---------- FAB ---------- */
+.fab {
+  position: fixed;
+  right: max(18px, calc(50% - 320px + 18px));
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, var(--pink-bright), var(--pink) 60%, #8f1f0c);
+  color: #fff;
+  font-size: 27px;
+  line-height: 1;
+  box-shadow: 0 8px 22px rgba(255,75,31,0.45), 0 0 0 1px rgba(255,255,255,0.08) inset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fab:active { transform: scale(0.95); }
+
+/* ---------- Forms ---------- */
+form.stack { display: flex; flex-direction: column; gap: 12px; }
+label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--fg-dim); }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+.btn {
+  appearance: none;
+  border: none;
+  border-radius: 10px;
+  padding: 13px 16px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-primary { background: linear-gradient(135deg, var(--pink-bright), var(--pink)); color: #fff; box-shadow: 0 3px 14px var(--pink-glow); }
+.btn-primary:active { filter: brightness(0.95); }
+.btn-ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); }
+.btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger-bright); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.hint { font-size: 11.5px; color: var(--fg-faint); line-height: 1.6; margin-top: 2px; }
+
+/* ---------- Bottom sheet ---------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5,3,10,0.66);
+  backdrop-filter: blur(2px);
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s;
+}
+.sheet-backdrop.open { opacity: 1; pointer-events: auto; }
+.sheet {
+  width: 100%;
+  max-width: 640px;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: linear-gradient(180deg, #221307, #160d07);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 20px 20px 0 0;
+  padding: 10px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(100%);
+  transition: transform 0.22s ease-out;
+}
+.sheet-backdrop.open .sheet { transform: translateY(0); }
+.sheet-grip { width: 38px; height: 4px; border-radius: 4px; background: var(--line); margin: 8px auto 16px; }
+.sheet-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.sheet-header h2 { margin: 0; font-size: 19px; }
+.sheet-close { background: none; border: none; color: var(--fg-dim); font-size: 22px; cursor: pointer; padding: 4px 8px; }
+
+/* ---------- Dartboard stamp dial ---------- */
+.dial-wrap { display: flex; align-items: center; gap: 18px; margin: 16px 0 18px; }
+.dial { flex: none; position: relative; width: 112px; height: 112px; }
+.dial svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.dial .dial-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.dial .dial-center .n { font-family: var(--tnum); font-size: 26px; color: var(--gold-bright); line-height: 1; }
+.dial .dial-center .l { font-size: 9px; color: var(--fg-faint); margin-top: 2px; letter-spacing: 0.05em; }
+.dial-info { flex: 1; min-width: 0; }
+.dial-info .reward-name { font-size: 14.5px; font-weight: 700; color: var(--fg); }
+.dial-info .reward-sub { font-size: 12px; color: var(--fg-dim); margin-top: 3px; line-height: 1.6; }
+.dial-info .reward-ready { margin-top: 6px; font-size: 12.5px; color: var(--good); font-weight: 700; }
+
+.detail-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin: 14px 0; }
+.detail-stats .box { background: var(--bg-elev-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 8px; text-align: center; }
+.detail-stats .box .n { font-family: var(--tnum); font-size: 20px; color: var(--pink-bright); }
+.detail-stats .box .l { font-size: 10px; color: var(--fg-faint); margin-top: 3px; }
+
+/* ---------- Referrer picker ---------- */
+.referrer-picker { position: relative; }
+.referrer-results {
+  margin-top: 6px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.referrer-results .rr-item {
+  padding: 10px 12px;
+  font-size: 13.5px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-soft);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.referrer-results .rr-item:last-child { border-bottom: none; }
+.referrer-results .rr-item:active { background: var(--bg-elev); }
+.referrer-results .rr-item .rr-sub { color: var(--fg-faint); font-size: 11.5px; }
+.referrer-results .rr-empty { padding: 10px 12px; font-size: 12.5px; color: var(--fg-faint); }
+.referrer-chip {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, rgba(255,75,31,0.18), rgba(232,180,58,0.12));
+  border: 1px solid var(--pink);
+  border-radius: 20px;
+  padding: 6px 8px 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.referrer-chip .rr-clear {
+  appearance: none;
+  border: none;
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.referral-note {
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.6;
+}
+
+.section-title {
+  font-size: 11px;
+  color: var(--pink-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  margin: 18px 0 8px;
+}
+
+/* ---------- Register (会計) ---------- */
+.reg-wrap { padding-bottom: 8px; }
+.reg-toggle-group { display: flex; flex-direction: column; gap: 8px; }
+.reg-toggle {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.reg-toggle.active {
+  background: linear-gradient(135deg, rgba(255,75,31,0.22), rgba(232,180,58,0.1));
+  border-color: var(--pink);
+  box-shadow: 0 0 0 1px var(--pink) inset;
+}
+.reg-toggle-price { font-family: var(--tnum); color: var(--gold-bright); font-size: 13px; }
+
+.reg-stepper { display: flex; align-items: center; gap: 12px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.reg-stepper-sm { padding: 5px 8px; gap: 8px; background: transparent; border: none; }
+.reg-step-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-elev-2);
+  color: var(--fg);
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.reg-step-btn:disabled { opacity: 0.4; cursor: default; }
+.reg-step-val { min-width: 34px; text-align: center; font-family: var(--tnum); font-size: 18px; }
+.reg-step-val .reg-step-unit { font-size: 10px; color: var(--fg-faint); margin-left: 2px; }
+.reg-step-sub { margin-left: auto; font-family: var(--tnum); font-size: 14px; color: var(--gold-bright); }
+
+.reg-menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.reg-menu-item { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; }
+.reg-menu-label { font-size: 13px; font-weight: 700; display: flex; justify-content: space-between; align-items: baseline; }
+.reg-menu-price { font-size: 10.5px; color: var(--fg-faint); font-weight: 400; }
+
+.reg-custom-row { display: flex; gap: 8px; align-items: stretch; }
+.reg-custom-row input { font-size: 14px; }
+.reg-custom-row input#regCustomAmount { max-width: 110px; }
+ul.reg-custom-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+ul.reg-custom-list li { display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--bg-elev-2); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+ul.reg-custom-list li span:first-child { flex: 1; min-width: 0; }
+ul.reg-custom-list li .amt { color: var(--gold-bright); }
+
+.reg-total-box {
+  margin-top: 18px;
+  background: linear-gradient(135deg, rgba(255,75,31,0.16), rgba(232,180,58,0.08));
+  border: 1px solid var(--pink);
+  border-radius: 14px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.reg-total-label { font-size: 12px; color: var(--fg-dim); letter-spacing: 0.06em; }
+.reg-total-amount { font-size: 30px; color: var(--gold-bright); text-shadow: 0 0 14px rgba(232,180,58,0.4); }
+
+.visit-form { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.visit-form input { flex: 1; }
+
+ul.visit-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; }
+ul.visit-log li { font-size: 12.5px; color: var(--fg-dim); display: flex; justify-content: space-between; border-bottom: 1px dashed var(--line); padding-bottom: 5px; }
+ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
+
+.action-row { display: flex; gap: 8px; margin-top: 20px; }
+.action-row .btn { flex: 1; }
+
+/* ---------- Toast ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%) translateY(10px);
+  background: linear-gradient(135deg, #301a0d, #1c0f07);
+  border: 1px solid var(--pink);
+  color: var(--fg);
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  z-index: 60;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+/* ---------- スタッフコード・ゲート ---------- */
+.staff-gate {
+  margin-top: 18vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+.staff-gate-icon { font-size: 34px; margin-bottom: 4px; }
+.staff-gate h2 { margin: 0; font-size: 17px; }
+.staff-gate .hint { max-width: 320px; }
+.staff-gate form.stack { width: 100%; max-width: 260px; margin-top: 8px; }
+.staffcode-display {
+  text-align: center;
+  font-family: var(--tnum);
+  font-size: 40px;
+  letter-spacing: 0.25em;
+  color: var(--gold-bright);
+  text-shadow: 0 0 14px rgba(232,180,58,0.4);
+  margin: 6px 0 16px;
+}
+.qr-card-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 16px;
+}
+.qr-card-canvas {
+  background: #fff;
+  padding: 16px;
+  border-radius: 20px;
+  box-shadow: 0 0 0 2px var(--line);
+  display: inline-block;
+}
+.id-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.id-doc-thumb {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  flex: none;
+  cursor: pointer;
+}
+.id-doc-meta { flex: 1; min-width: 0; }
+.id-doc-warn-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--danger-bright, #ff6f7a);
+}
+
+/* ---------- 分析(経営戦略)タブ・バーチャート ---------- */
+.bar-list { display: flex; flex-direction: column; gap: 9px; margin-bottom: 6px; }
+.bar-row { display: flex; align-items: center; gap: 10px; }
+.bar-row .bar-label {
+  flex: none;
+  width: 48px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.bar-row .bar-track {
+  flex: 1;
+  min-width: 0;
+  height: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.bar-row .bar-fill {
+  height: 100%;
+  min-width: 2px;
+  background: linear-gradient(90deg, var(--pink), var(--gold-bright));
+  border-radius: 7px 0 0 7px;
+}
+.bar-row .bar-value {
+  flex: none;
+  min-width: 58px;
+  text-align: right;
+  font-family: var(--tnum);
+  font-size: 11.5px;
+  color: var(--fg);
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand-row">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="21" stroke="#f6eefb" stroke-width="2.4"/>
+          <circle cx="24" cy="24" r="14" fill="#f6eefb"/>
+          <circle cx="24" cy="24" r="14" fill="none" stroke="#140b06" stroke-width="2"/>
+          <path d="M24 10 A14 14 0 0 1 24 38" fill="#140b06"/>
+          <circle cx="24" cy="24" r="4.5" fill="#140b06"/>
+          <circle cx="24" cy="24" r="4.5" fill="none" stroke="#f6eefb" stroke-width="1.6"/>
+          <circle cx="24" cy="24" r="1.6" fill="#ff4b1f"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="eyebrow">Darts &amp; Game Bar</div>
+        <h1>Bar<span class="accent">てきな？</span> 会員証</h1>
+      </div>
+      <button class="lock-btn" id="pricingBtn" aria-label="料金設定" hidden>💴</button>
+      <button class="lock-btn" id="staffCodeBtn" aria-label="スタッフコード管理" hidden>🔑</button>
+      <button class="lock-btn" id="lockBtn" aria-label="オーナーロック">🔒</button>
+    </div>
+
+    <div class="scoreboard" id="scoreboard">
+      <div class="score-tile"><div class="v num" id="statMembers">—</div><div class="k">会員数</div></div>
+      <div class="score-tile"><div class="v num" id="statStamps">—</div><div class="k">累計スタンプ</div></div>
+      <div class="score-tile"><div class="v num" id="statBday">—</div><div class="k">今月誕生日</div></div>
+    </div>
+
+    <nav class="tabs">
+      <button data-tab="list">会員一覧</button>
+      <button class="active" data-tab="register">会計</button>
+      <button data-tab="new">新規登録</button>
+      <button data-tab="birthday">誕生日</button>
+      <button data-tab="sales">売上</button>
+      <button data-tab="analysis">分析</button>
+    </nav>
+  </header>
+
+  <main id="main"></main>
+</div>
+
+<button class="fab" id="fabAdd" aria-label="新規会員を登録">＋</button>
+
+<div class="sheet-backdrop" id="sheetBackdrop">
+  <div class="sheet" id="sheetBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- Firebase 初期化 ----
+  // このアプリは GitHub Pages で配信される静的サイト(Claude Artifactではない)ため、
+  // 実際の Firebase JS SDK(compat版)を読み込んで Firestore に直接接続する。
+  // 設定値を変更する場合は下記 firebaseConfig を書き換えること(README.md 参照)。
+  const firebaseConfig = {
+    apiKey: "AIzaSyBrAsCJCIyv1Ka2ClmkF6ZivX5I8MUZ0lo",
+    authDomain: "bar-tekina.firebaseapp.com",
+    projectId: "bar-tekina",
+    storageBucket: "bar-tekina.firebasestorage.app",
+    messagingSenderId: "256271315426",
+    appId: "1:256271315426:web:bce7459f7fc4d9241649bb",
+  };
+
+  const REWARD_THRESHOLD = 5;
+  const REWARD_LABEL = "ドリンク1杯サービス";
+
+  // 友達紹介まわりの設定
+  const REFERRAL_BONUS_POINTS = 3;   // 紹介者が受け取るボーナス(紹介された人の初来店時)
+  const REFERRAL_WELCOME_POINTS = 1; // 紹介された本人への登録時ボーナス
+  const REFERRAL_MONTHLY_CAP = 5;    // 1人の紹介者が30日間に受け取れるボーナスの上限回数
+  const REFERRAL_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+  // ---- 会計(レジ)まわりの設定 ----
+  // 飲み放題(90分)は男性・女性/学生で人数を入力、単品は人数のみ記録(料金はメニュー/その他で加算)
+  // ここの価格は初期値。オーナーが💴ボタンからアプリ内でいつでも変更でき、変更後はその値が使われる。
+  const COURSES = [
+    { key: "male", label: "男性", price: 3000 },
+    { key: "female", label: "女性・学生", price: 2500 },
+  ];
+  let EXTENSION_PRICE = 500;
+  let TANPIN_CHARGE = 1100;
+  const GAME_ITEMS = [
+    { key: "games", label: "ゲーム・ダーツ・カラオケ", price: 1500 },
+  ];
+  const BASE_MENU_ITEMS = [
+    { key: "kakigori", label: "かき氷", price: 300 },
+    { key: "softcream", label: "ソフトクリーム", price: 400 },
+    { key: "alcohol", label: "アルコール", price: 700 },
+    { key: "softdrink", label: "ソフトドリンク", price: 700 },
+    { key: "staffdrink", label: "スタッフドリンク", price: 0 },
+  ];
+  // オーナーが💴ボタンから追加できる、追加メニューの独自項目(店舗ごとに自由に追加)
+  let CUSTOM_MENU_ITEMS = [];
+  let MENU_ITEMS = BASE_MENU_ITEMS.concat(CUSTOM_MENU_ITEMS);
+  let ALL_MENU_ITEMS = GAME_ITEMS.concat(MENU_ITEMS);
+  // 料金設定画面で編集できる全項目(飲み放題+ゲーム等+追加メニュー)。延長・単品チャージ料は別のスカラー値として扱う。
+  let ALL_PRICE_FIELDS = COURSES.concat(ALL_MENU_ITEMS);
+  const DEFAULT_PRICES = { extension: EXTENSION_PRICE, tanpin: TANPIN_CHARGE };
+  ALL_PRICE_FIELDS.forEach((it) => { DEFAULT_PRICES[it.key] = it.price; });
+  function rebuildMenuAggregates() {
+    MENU_ITEMS = BASE_MENU_ITEMS.concat(CUSTOM_MENU_ITEMS);
+    ALL_MENU_ITEMS = GAME_ITEMS.concat(MENU_ITEMS);
+    ALL_PRICE_FIELDS = COURSES.concat(ALL_MENU_ITEMS);
+  }
+  function courseOf(key) { return COURSES.find((c) => c.key === key) || null; }
+  function createEmptyRegister() {
+    return {
+      course: { male: 0, female: 0 }, tanpinCount: 0,
+      extensions: 0, menu: {}, customItems: [], memberId: null, memberLabel: "", guest: false, memberQuery: "",
+    };
+  }
+
+  const state = {
+    db: null, ready: false, members: [], tab: "register", search: "", register: createEmptyRegister(),
+    unlocked: false, staffCode: null, staffGranted: false, staffGateChecked: false,
+    pendingEntryMemberId: null, publicJoinMode: false, publicJoinDone: false,
+    guestSales: [], guestSalesReady: false,
+    visitLog: [], visitLogReady: false,
+  };
+
+  // ---- 会員の入店QRコード(スキャンで会計対象に自動セット) ----
+  // 会員ごとのQRを開くと #m<会員ID> のハッシュ付きでこのページが開く。
+  // それを読み取って、会計(レジ)タブにその会員をセットする。
+  // #join のハッシュで開くと、PIN・スタッフコードなしで新規登録フォームだけを表示する
+  // (会員登録用QR。お客様ご自身のスマホで本人確認書類を撮影して登録できる)。
+  (function captureEntryHashOnLoad() {
+    const hash = (location.hash || "").replace(/^#/, "");
+    if (hash === "join") { state.publicJoinMode = true; return; }
+    const m = /^m([a-zA-Z0-9_-]{4,})$/.exec(hash);
+    if (m) state.pendingEntryMemberId = m[1];
+  })();
+  function tryApplyMemberEntry() {
+    if (!state.pendingEntryMemberId) return;
+    if (!state.staffGranted || !state.ready) return;
+    const id = state.pendingEntryMemberId;
+    const member = state.members.find((m) => m.id === id);
+    state.pendingEntryMemberId = null;
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (err) {}
+    if (!member) { showToast("会員情報が見つかりませんでした"); return; }
+    state.tab = "register";
+    state.register = createEmptyRegister();
+    state.register.memberId = member.id;
+    state.register.memberLabel = member.name || "名前未設定";
+    showToast(`${member.name || "会員"}さんを会計対象にセットしました`);
+    render();
+  }
+
+  // ---- オーナー専用ロック ----
+  // 会員一覧・新規登録・誕生日・スコアボード(会員情報・売上・個人の利用金額)は
+  // このPINを解除した人(オーナー)だけが見られる。会計(レジ)タブはスタッフも常に使える。
+  // PIN自体は Firestore の settings/app ドキュメントに保存し(初回起動時に初期値 "6188" を
+  // 自動で書き込む)、起動後は state.db の onSnapshot で同期した値を使う。
+  let OWNER_PIN = "6188";
+  const LOCK_STORAGE_KEY = "btekina_owner_unlocked";
+  const RESTRICTED_TABS = ["list", "new", "birthday", "sales", "analysis"];
+  function readStoredUnlock() {
+    try { return localStorage.getItem(LOCK_STORAGE_KEY) === "1"; } catch (err) { return false; }
+  }
+
+  // ---- スタッフ専用コード ----
+  // 会計(レジ)タブを使うにはこのコードが必要。オーナーがいつでも再発行でき、
+  // 再発行すると以前のコード/QRコードを使っていた端末は全てアクセスできなくなる
+  // (退職・交代したスタッフを締め出せる)。
+  const STAFF_CODE_STORAGE_KEY = "btekina_staff_code";
+  function readStoredStaffCode() {
+    try { return localStorage.getItem(STAFF_CODE_STORAGE_KEY); } catch (err) { return null; }
+  }
+  function writeStoredStaffCode(v) {
+    try {
+      if (v) localStorage.setItem(STAFF_CODE_STORAGE_KEY, v);
+      else localStorage.removeItem(STAFF_CODE_STORAGE_KEY);
+    } catch (err) {}
+  }
+  function writeStoredUnlock(v) {
+    try {
+      if (v) localStorage.setItem(LOCK_STORAGE_KEY, "1");
+      else localStorage.removeItem(LOCK_STORAGE_KEY);
+    } catch (err) { /* ignore */ }
+  }
+
+  const $main = document.getElementById("main");
+  const $sheetBackdrop = document.getElementById("sheetBackdrop");
+  const $sheetBody = document.getElementById("sheetBody");
+  const $toast = document.getElementById("toast");
+  const $statMembers = document.getElementById("statMembers");
+  const $statStamps = document.getElementById("statStamps");
+  const $statBday = document.getElementById("statBday");
+
+  function escapeHtml(str) {
+    return String(str == null ? "" : str).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  function normalizePhone(str) {
+    return String(str || "").replace(/[^0-9]/g, "");
+  }
+
+  function findMemberByPhone(phone, excludeId) {
+    const norm = normalizePhone(phone);
+    if (!norm) return null;
+    return state.members.find((m) => m.id !== excludeId && normalizePhone(m.phone) === norm) || null;
+  }
+
+  function referredCountOf(memberId) {
+    return state.members.filter((m) => m.referredBy && m.referredBy.id === memberId).length;
+  }
+
+  // ---- 会員ランク(来店で積み上がる累計ポイントで判定。特典利用で現在ポイントが
+  // 0に戻ってもランクは下がらない) ----
+  const TIERS = [
+    { key: "vip", label: "VIP", min: 40 },
+    { key: "gold", label: "GOLD", min: 15 },
+    { key: "regular", label: "REGULAR", min: 0 },
+  ];
+  function lifetimePointsOf(m) {
+    return (m.totalPointsEarned != null ? m.totalPointsEarned : m.points) || 0;
+  }
+  function tierOf(m) {
+    const total = lifetimePointsOf(m);
+    return TIERS.find((t) => total >= t.min) || TIERS[TIERS.length - 1];
+  }
+  function tierBadgeHtml(m) {
+    const t = tierOf(m);
+    return `<span class="tier-badge tier-${t.key}">${t.label}</span>`;
+  }
+  const TIER_COLORS = { regular: "var(--fg-faint)", gold: "var(--gold-bright)", vip: "var(--pink-bright)" };
+  function tierColorOf(m) {
+    return TIER_COLORS[tierOf(m).key] || TIER_COLORS.regular;
+  }
+  function tierNextInfo(m) {
+    const total = lifetimePointsOf(m);
+    const tier = tierOf(m);
+    const idx = TIERS.findIndex((t) => t.key === tier.key);
+    const next = idx > 0 ? TIERS[idx - 1] : null;
+    if (!next) return "最上位ランクです";
+    return `${next.label}まであと${next.min - total}pt`;
+  }
+
+  // ---- 会計(レジ)の金額計算 ----
+  function registerTotal(reg) {
+    let total = 0;
+    COURSES.forEach((c) => { total += (reg.course[c.key] || 0) * c.price; });
+    total += (reg.tanpinCount || 0) * TANPIN_CHARGE;
+    total += (reg.extensions || 0) * EXTENSION_PRICE;
+    ALL_MENU_ITEMS.forEach((it) => { total += (reg.menu[it.key] || 0) * it.price; });
+    (reg.customItems || []).forEach((c) => { total += Number(c.amount) || 0; });
+    return total;
+  }
+  function registerHasItems(reg) {
+    return COURSES.some((c) => (reg.course[c.key] || 0) > 0) ||
+      (reg.tanpinCount || 0) > 0 ||
+      (reg.extensions || 0) > 0 ||
+      ALL_MENU_ITEMS.some((it) => (reg.menu[it.key] || 0) > 0) ||
+      (reg.customItems || []).length > 0;
+  }
+  function registerBreakdownText(reg) {
+    const parts = [];
+    COURSES.forEach((c) => {
+      const n = reg.course[c.key] || 0;
+      if (n > 0) parts.push(`${c.label}飲み放題×${n}`);
+    });
+    if (reg.tanpinCount) parts.push(`単品チャージ×${reg.tanpinCount}`);
+    if (reg.extensions) parts.push(`延長${reg.extensions}h`);
+    ALL_MENU_ITEMS.forEach((it) => {
+      const n = reg.menu[it.key] || 0;
+      if (n > 0) parts.push(`${it.label}×${n}`);
+    });
+    (reg.customItems || []).forEach((c) => {
+      parts.push(`${c.label || "その他"}¥${(Number(c.amount) || 0).toLocaleString()}`);
+    });
+    return parts.join(" + ") || "会計";
+  }
+
+  function showToast(msg) {
+    $toast.textContent = msg;
+    $toast.classList.add("show");
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => $toast.classList.remove("show"), 2200);
+  }
+
+  function closeSheet() {
+    $sheetBackdrop.classList.remove("open");
+    setTimeout(() => { $sheetBody.innerHTML = ""; }, 200);
+  }
+  $sheetBackdrop.addEventListener("click", (e) => { if (e.target === $sheetBackdrop) closeSheet(); });
+
+  function openSheet(html) {
+    $sheetBody.innerHTML = `<div class="sheet-grip"></div>${html}`;
+    $sheetBackdrop.classList.add("open");
+  }
+
+  function todayParts() {
+    const d = new Date();
+    return { m: d.getMonth() + 1, day: d.getDate() };
+  }
+  function isBirthdayMonth(m) {
+    if (!m.birthMonth) return false;
+    return Number(m.birthMonth) === todayParts().m;
+  }
+  function initials(name) {
+    const n = (name || "").trim();
+    return n ? n.slice(0, 1) : "?";
+  }
+
+  function birthdayTextOf(m) {
+    if (!m.birthMonth) return "未登録";
+    const y = m.birthYear ? `${m.birthYear}年` : "";
+    const d = m.birthDay ? `${m.birthDay}日` : "";
+    return `${y}${m.birthMonth}月${d}`;
+  }
+
+  function ageOf(m) {
+    if (!m.birthYear || !m.birthMonth || !m.birthDay) return null;
+    const today = new Date();
+    let age = today.getFullYear() - m.birthYear;
+    const beforeBirthday =
+      today.getMonth() + 1 < m.birthMonth ||
+      (today.getMonth() + 1 === m.birthMonth && today.getDate() < m.birthDay);
+    if (beforeBirthday) age -= 1;
+    return age >= 0 && age < 130 ? age : null;
+  }
+
+  document.querySelectorAll("nav.tabs button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (RESTRICTED_TABS.includes(btn.dataset.tab) && !state.unlocked) { openPinSheet(); return; }
+      document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.tab = btn.dataset.tab;
+      render();
+    });
+  });
+  document.getElementById("fabAdd").addEventListener("click", () => {
+    if (!state.unlocked) { openPinSheet(); return; }
+    document.querySelector('nav.tabs button[data-tab="new"]').click();
+  });
+
+  // ---------- オーナーロックUI ----------
+  const $lockBtn = document.getElementById("lockBtn");
+  const $staffCodeBtn = document.getElementById("staffCodeBtn");
+  const $pricingBtn = document.getElementById("pricingBtn");
+  const $scoreboard = document.getElementById("scoreboard");
+  const $tabsNav = document.querySelector("nav.tabs");
+
+  function applyLockUI() {
+    $lockBtn.classList.toggle("unlocked", state.unlocked);
+    $lockBtn.textContent = state.unlocked ? "🔓" : "🔒";
+    $staffCodeBtn.hidden = !state.unlocked;
+    $pricingBtn.hidden = !state.unlocked;
+    document.querySelectorAll("nav.tabs button").forEach((btn) => {
+      const restricted = RESTRICTED_TABS.includes(btn.dataset.tab);
+      btn.hidden = restricted && !state.unlocked;
+    });
+    $scoreboard.hidden = !state.unlocked;
+    document.getElementById("fabAdd").hidden = !state.unlocked;
+    if (RESTRICTED_TABS.includes(state.tab) && !state.unlocked) {
+      state.tab = "register";
+      document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.remove("active"));
+      const regBtn = document.querySelector('nav.tabs button[data-tab="register"]');
+      if (regBtn) regBtn.classList.add("active");
+    }
+  }
+
+  // ---------- スタッフコード・ゲート(会計タブの利用制限) ----------
+  function evaluateStaffAccess() {
+    if (state.unlocked) { state.staffGranted = true; render(); tryApplyMemberEntry(); return; }
+    if (!state.staffCode) { render(); return; }
+    const hash = (location.hash || "").replace(/^#/, "");
+    if (hash && hash === state.staffCode) {
+      writeStoredStaffCode(state.staffCode);
+      state.staffGranted = true;
+    } else {
+      state.staffGranted = readStoredStaffCode() === state.staffCode;
+    }
+    render();
+    tryApplyMemberEntry();
+  }
+
+  function staffGateHtml() {
+    return `
+      <div class="staff-gate">
+        <div class="staff-gate-icon">🔑</div>
+        <h2>スタッフ専用コードが必要です</h2>
+        <p class="hint">オーナーから伝えられた4桁のコードを入力してください。専用QRコードから開いた場合は自動で認証されます。</p>
+        <form class="stack" id="staffGateForm">
+          <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" class="pin-input" id="staffGateInput" autocomplete="off" autofocus placeholder="コード">
+          <button type="submit" class="btn btn-primary">入室する</button>
+        </form>
+      </div>
+    `;
+  }
+  function bindStaffGateForm() {
+    const $form = document.getElementById("staffGateForm");
+    if (!$form) return;
+    const $input = document.getElementById("staffGateInput");
+    $form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      if (state.staffCode && $input.value.trim() === state.staffCode) {
+        writeStoredStaffCode(state.staffCode);
+        state.staffGranted = true;
+        showToast("認証しました");
+        render();
+        tryApplyMemberEntry();
+      } else {
+        showToast("コードが違います");
+        $input.value = "";
+        $input.focus();
+      }
+    });
+  }
+
+  function openStaffCodeSheet() {
+    const code = state.staffCode || "----";
+    const html = `
+      <div class="sheet-header">
+        <h2>スタッフ専用コード</h2>
+        <button class="sheet-close" id="closeStaffCode" aria-label="閉じる">×</button>
+      </div>
+      <div class="staffcode-display">${escapeHtml(code)}</div>
+      <p class="hint">スタッフはこのコードを一度入力する(またはこのコード付きのQRコードから開く)と、その端末では次回から自動で会計画面に入れます。</p>
+      <button class="btn btn-danger" id="regenStaffCode" style="width:100%;">コードを再発行する(退職・交代したスタッフを締め出す)</button>
+      <p class="hint">再発行すると、これまでのコードやQRコードを使っていた端末は全てアクセスできなくなります。新しいコードのQRコードが必要な場合は作り直しますので教えてください。</p>
+    `;
+    openSheet(html);
+    document.getElementById("closeStaffCode").addEventListener("click", closeSheet);
+    document.getElementById("regenStaffCode").addEventListener("click", async () => {
+      const newCode = String(Math.floor(1000 + Math.random() * 9000));
+      try {
+        await state.db.collection("settings").doc("staffAccess").set({ code: newCode, updatedAt: Date.now() });
+        showToast("新しいコードを発行しました: " + newCode);
+        closeSheet();
+      } catch (err) {
+        showToast("更新に失敗しました");
+      }
+    });
+  }
+  $staffCodeBtn.addEventListener("click", openStaffCodeSheet);
+
+  // ---------- 料金設定(すべての料金+追加メニューの新規項目をここで編集できる) ----------
+  function openPricingSheet() {
+    // 保存前の作業用コピー(保存するまでDBには反映しない)
+    let draftCustom = CUSTOM_MENU_ITEMS.map((it) => ({ ...it }));
+
+    function renderHtml() {
+      const courseFields = COURSES.map(
+        (c) => `
+          <label class="field">${c.label}(飲み放題90分・1人あたり)
+            <input type="number" id="price_${c.key}" min="0" step="1" value="${c.price}">
+          </label>`
+      ).join("");
+      const gameFields = GAME_ITEMS.map(
+        (it) => `
+          <label class="field">${it.label}(込みで1人あたり)
+            <input type="number" id="price_${it.key}" min="0" step="1" value="${it.price}">
+          </label>`
+      ).join("");
+      const menuFields = BASE_MENU_ITEMS.map(
+        (it) => `
+          <label class="field">${it.label}
+            <input type="number" id="price_${it.key}" min="0" step="1" value="${it.price}">
+          </label>`
+      ).join("");
+      const customFields = draftCustom.map(
+        (it, i) => `
+          <div class="reg-custom-row">
+            <input type="text" class="custom-label" data-custom-idx="${i}" value="${escapeHtml(it.label)}" placeholder="品名">
+            <input type="number" class="custom-price" data-custom-idx="${i}" min="0" step="1" value="${it.price}">
+            <button type="button" class="rr-clear" data-custom-del="${i}" aria-label="削除">×</button>
+          </div>`
+      ).join("");
+      return `
+        <div class="sheet-header">
+          <h2>料金設定</h2>
+          <button class="sheet-close" id="closePricing" aria-label="閉じる">×</button>
+        </div>
+        <form class="stack" id="pricingForm">
+          <h3 class="section-title">飲み放題(90分)</h3>
+          ${courseFields}
+          <label class="field">延長(1時間ごと・1人あたり)
+            <input type="number" id="price_extension" min="0" step="1" value="${EXTENSION_PRICE}">
+          </label>
+          <h3 class="section-title">単品</h3>
+          <label class="field">単品チャージ料(1人あたり)
+            <input type="number" id="price_tanpin" min="0" step="1" value="${TANPIN_CHARGE}">
+          </label>
+          ${gameFields}
+          <h3 class="section-title">追加メニュー</h3>
+          ${menuFields}
+          ${customFields}
+          <div class="reg-custom-row">
+            <input type="text" id="newCustomLabel" placeholder="新しい項目名(例:ソフト麺)">
+            <input type="number" id="newCustomPrice" placeholder="金額" min="0" step="1">
+            <button type="button" class="btn btn-ghost" id="newCustomAdd">項目を追加</button>
+          </div>
+          <p class="hint">新しい項目はここで「項目を追加」→ 下の「保存する」で確定します。会計(レジ)画面の追加メニューにすぐ表示されます。</p>
+          <button type="submit" class="btn btn-primary">保存する</button>
+          <p class="hint">ここで変更した料金は、会計(レジ)画面にすぐ反映されます。</p>
+        </form>
+      `;
+    }
+
+    function mount() {
+      openSheet(renderHtml());
+      document.getElementById("closePricing").addEventListener("click", closeSheet);
+
+      document.querySelectorAll("[data-custom-del]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const idx = Number(btn.dataset.customDel);
+          draftCustom.splice(idx, 1);
+          mount();
+        });
+      });
+
+      document.getElementById("newCustomAdd").addEventListener("click", () => {
+        const labelInput = document.getElementById("newCustomLabel");
+        const priceInput = document.getElementById("newCustomPrice");
+        const label = labelInput.value.trim();
+        const price = Math.max(0, Number(priceInput.value) || 0);
+        if (!label) {
+          showToast("品名を入力してください");
+          return;
+        }
+        draftCustom.push({ key: `custom_${Date.now()}_${Math.floor(Math.random() * 1000)}`, label, price });
+        mount();
+      });
+
+      document.getElementById("pricingForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        document.querySelectorAll(".custom-label").forEach((inp) => {
+          const idx = Number(inp.dataset.customIdx);
+          if (draftCustom[idx]) draftCustom[idx].label = inp.value.trim() || draftCustom[idx].label;
+        });
+        document.querySelectorAll(".custom-price").forEach((inp) => {
+          const idx = Number(inp.dataset.customIdx);
+          if (draftCustom[idx]) draftCustom[idx].price = Math.max(0, Number(inp.value) || 0);
+        });
+
+        const payload = { updatedAt: Date.now() };
+        COURSES.concat(GAME_ITEMS).concat(BASE_MENU_ITEMS).forEach((it) => {
+          const el = document.getElementById(`price_${it.key}`);
+          payload[it.key] = Math.max(0, Number(el.value) || 0);
+        });
+        payload.extension = Math.max(0, Number(document.getElementById("price_extension").value) || 0);
+        payload.tanpin = Math.max(0, Number(document.getElementById("price_tanpin").value) || 0);
+        payload.customMenu = draftCustom.map((it) => ({ key: it.key, label: it.label, price: it.price }));
+
+        try {
+          await state.db.collection("settings").doc("pricing").set(payload);
+          closeSheet();
+          showToast("料金を更新しました");
+        } catch (err) {
+          showToast("更新に失敗しました");
+        }
+      });
+    }
+
+    mount();
+  }
+  $pricingBtn.addEventListener("click", openPricingSheet);
+
+  function openPinSheet() {
+    const html = `
+      <div class="sheet-header">
+        <h2>オーナーロック解除</h2>
+        <button class="sheet-close" id="closePin" aria-label="閉じる">×</button>
+      </div>
+      <form class="stack" id="pinForm">
+        <label class="field">PINを入力
+          <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" class="pin-input" id="pinInput" autocomplete="off" autofocus>
+        </label>
+        <button type="submit" class="btn btn-primary">解除する</button>
+        <p class="hint">会員情報・来店履歴・売上などオーナー専用の内容が見られるようになります。会計(レジ)はPINなしでいつでも使えます。</p>
+      </form>
+    `;
+    openSheet(html);
+    document.getElementById("closePin").addEventListener("click", closeSheet);
+    const $pinInput = document.getElementById("pinInput");
+    $pinInput.focus();
+    document.getElementById("pinForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      if ($pinInput.value === OWNER_PIN) {
+        state.unlocked = true;
+        writeStoredUnlock(true);
+        closeSheet();
+        applyLockUI();
+        document.querySelector('nav.tabs button[data-tab="list"]').click();
+        showToast("オーナーロックを解除しました");
+      } else {
+        showToast("PINが違います");
+        $pinInput.value = "";
+        $pinInput.focus();
+      }
+    });
+  }
+
+  $lockBtn.addEventListener("click", () => {
+    if (state.unlocked) {
+      state.unlocked = false;
+      writeStoredUnlock(false);
+      applyLockUI();
+      render();
+      showToast("ロックしました");
+    } else {
+      openPinSheet();
+    }
+  });
+
+  // ---------- dial (dartboard-style stamp progress ring) ----------
+  function dialSvg(pct, idSuffix) {
+    const r = 48, c = 2 * Math.PI * r;
+    const offset = c - (pct / 100) * c;
+    return `
+      <svg viewBox="0 0 112 112">
+        <circle cx="56" cy="56" r="${r}" fill="none" stroke="var(--line)" stroke-width="9"/>
+        <circle cx="56" cy="56" r="${r}" fill="none" stroke="url(#dialGrad${idSuffix})" stroke-width="9"
+          stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}"/>
+        <defs>
+          <linearGradient id="dialGrad${idSuffix}" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="var(--pink-bright)"/>
+            <stop offset="100%" stop-color="var(--gold-bright)"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    `;
+  }
+
+  // ---------- render ----------
+  function render() {
+    if (state.publicJoinMode) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      $lockBtn.hidden = true;
+      $staffCodeBtn.hidden = true;
+      $pricingBtn.hidden = true;
+      if (!state.ready) {
+        $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+        return;
+      }
+      $main.innerHTML = `<p class="hint" style="margin:4px 0 14px;">ご来店ありがとうございます。会員登録にご協力をお願いします(本人確認書類の撮影が必要です)。</p>` + newMemberFormHtml();
+      bindNewMemberForm($main);
+      return;
+    }
+
+    if (RESTRICTED_TABS.includes(state.tab) && !state.unlocked) {
+      state.tab = "register";
+    }
+
+    if (!state.unlocked && !state.staffGranted) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      if (!state.staffGateChecked) {
+        $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+      } else {
+        $main.innerHTML = staffGateHtml();
+        bindStaffGateForm();
+      }
+      return;
+    }
+    $tabsNav.hidden = false;
+
+    if (!state.ready) {
+      $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+      return;
+    }
+
+    const totalPoints = state.members.reduce((s, m) => s + (m.points || 0), 0);
+    const bdayCount = state.members.filter(isBirthdayMonth).length;
+    $statMembers.textContent = state.members.length;
+    $statStamps.textContent = totalPoints;
+    $statBday.textContent = bdayCount;
+
+    if (state.tab === "new") {
+      $main.innerHTML = newMemberFormHtml();
+      bindNewMemberForm($main);
+      return;
+    }
+
+    if (state.tab === "sales") {
+      $main.innerHTML = salesTabHtml();
+      return;
+    }
+
+    if (state.tab === "analysis") {
+      $main.innerHTML = analysisTabHtml();
+      return;
+    }
+
+    if (state.tab === "register") {
+      $main.innerHTML = registerTabHtml();
+      bindRegisterTab($main);
+      return;
+    }
+
+    let list = state.members;
+    if (state.tab === "birthday") list = list.filter(isBirthdayMonth);
+    if (state.search.trim()) {
+      const q = state.search.trim().toLowerCase();
+      list = list.filter((m) => (m.name || "").toLowerCase().includes(q) || (m.phone || "").includes(q));
+    }
+
+    let html = "";
+    if (state.tab !== "birthday") {
+      html += `
+        <div class="search-row">
+          <input type="text" id="searchInput" placeholder="名前・電話番号で検索" value="${escapeHtml(state.search)}">
+        </div>
+      `;
+    } else if (list.length) {
+      html += `<p class="hint" style="margin-bottom:12px;">今月誕生日の会員です。クーポン配布の目安にどうぞ。</p>`;
+    }
+
+    if (!list.length) {
+      html += emptyStateHtml(state.tab, !!state.search.trim());
+    } else {
+      const groups = { vip: [], gold: [], regular: [] };
+      list.forEach((m) => { groups[tierOf(m).key].push(m); });
+      html += TIERS.map((t) => {
+        const members = groups[t.key];
+        if (!members.length) return "";
+        return `
+          <div class="tier-section">
+            <div class="tier-section-title tier-${t.key}">
+              <span>${t.label}</span>
+              <span class="count">${members.length}名</span>
+            </div>
+            <ul class="member-list">${members.map(memberCardHtml).join("")}</ul>
+          </div>
+        `;
+      }).join("");
+    }
+
+    $main.innerHTML = html;
+
+    const $search = document.getElementById("searchInput");
+    if ($search) {
+      $search.addEventListener("input", (e) => { state.search = e.target.value; render(); });
+      const pos = $search.value.length;
+      $search.focus();
+      $search.setSelectionRange(pos, pos);
+    }
+
+    $main.querySelectorAll(".member-card").forEach((el) => {
+      el.addEventListener("click", () => openMemberDetail(el.dataset.id));
+    });
+  }
+
+  function emptyIcon() {
+    return `<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="24" cy="24" r="20" stroke="var(--fg-faint)" stroke-width="2"/>
+      <circle cx="24" cy="24" r="12.5" stroke="var(--fg-faint)" stroke-width="2"/>
+      <circle cx="24" cy="24" r="4" fill="var(--pink-bright)"/>
+    </svg>`;
+  }
+
+  function emptyStateHtml(tab, searching) {
+    if (searching) return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>該当する会員が見つかりません。</p></div>`;
+    if (tab === "birthday") return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>今月が誕生日の会員はいません。</p></div>`;
+    return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>まだ会員が登録されていません。</p><p>右下の「＋」から最初の会員を登録しましょう。</p></div>`;
+  }
+
+  function memberCardHtml(m) {
+    const bday = isBirthdayMonth(m) ? `<span class="bday-badge" title="今月誕生日">🎂</span>` : "";
+    const idDocMissing = !(m.idDocument && m.idDocument.image);
+    const idWarn = idDocMissing ? `<span class="id-doc-warn-badge" title="本人確認書類が未登録です">⚠️書類未登録</span>` : "";
+    const phone = m.phone ? escapeHtml(m.phone) : "電話番号未登録";
+    const visits = m.visitCount || 0;
+    const pct = Math.round((((m.points || 0) % REWARD_THRESHOLD) / REWARD_THRESHOLD) * 100) || (m.points ? 100 : 6);
+    const tier = tierOf(m);
+    const tierKey = tier.key;
+    return `
+      <li class="member-card tier-${tierKey}" data-id="${m.id}" data-tier-label="${escapeHtml(tier.label)}">
+        <div class="card-top">
+          <div class="avatar-ring" style="--pct:${pct}%">
+            <div class="avatar-inner">${escapeHtml(initials(m.name))}</div>
+          </div>
+          <div class="member-info">
+            <div class="name-row"><span class="name">${escapeHtml(m.name || "名前未設定")}</span>${tierBadgeHtml(m)}${bday}</div>
+            <div class="meta">${phone} ・ 来店${visits}回${idWarn}</div>
+          </div>
+        </div>
+        <div class="member-right">
+          <div class="pts num">${m.points || 0}</div>
+          <div class="pts-label">STAMPS</div>
+        </div>
+      </li>
+    `;
+  }
+
+  // ---------- new member ----------
+  function newMemberFormHtml() {
+    return `
+      <form class="stack" id="newMemberForm">
+        <label class="field">お名前 *
+          <input type="text" id="f-name" name="name" placeholder="例）網走 太郎" required>
+        </label>
+        <label class="field">電話番号 <span id="phoneRequiredMark" hidden>(紹介登録には必須)</span>
+          <input type="tel" id="f-phone" name="phone" placeholder="例）090-1234-5678">
+        </label>
+        <label class="field">住所
+          <input type="text" id="f-address" name="address" placeholder="例）北海道網走市南3条1丁目">
+        </label>
+        <div class="three-col">
+          <label class="field">誕生年(西暦)
+            <input type="number" id="f-byear" name="birthYear" min="1900" max="2100" placeholder="例）1990">
+          </label>
+          <label class="field">誕生月
+            <input type="number" id="f-bmonth" name="birthMonth" min="1" max="12" placeholder="例）8">
+          </label>
+          <label class="field">誕生日
+            <input type="number" id="f-bday" name="birthDay" min="1" max="31" placeholder="例）25">
+          </label>
+        </div>
+        <label class="field">メモ
+          <textarea id="f-memo" name="memo" rows="2" placeholder="好きなお酒、席の好みなど"></textarea>
+        </label>
+
+        <label class="field">本人確認書類 *(免許証・学生証・保険証など)
+          <select id="f-id-type">
+            <option value="">書類の種類を選択</option>
+            <option value="license">運転免許証</option>
+            <option value="student">学生証</option>
+            <option value="insurance">保険証</option>
+            <option value="other">その他</option>
+          </select>
+        </label>
+        <div id="f-id-preview-wrap" hidden>
+          <img id="f-id-preview" alt="本人確認書類プレビュー" style="max-width:160px;border-radius:10px;border:1px solid var(--line);display:block;margin-bottom:8px;">
+        </div>
+        <input type="file" accept="image/*" capture="environment" id="f-id-file" style="display:none">
+        <div class="reg-custom-row">
+          <button type="button" class="btn btn-ghost" id="f-id-capture" style="flex:1;">📷 書類を撮影する</button>
+          <button type="button" class="btn btn-ghost" id="f-id-clear" hidden style="flex:none;">削除</button>
+        </div>
+        <p class="hint">なりすまし・年齢詐称を防ぐため、全会員に本人確認書類の撮影が必要です。画像はこのアプリ内にのみ保存されます。</p>
+
+        <label class="field">紹介者(任意)
+          <div class="referrer-picker">
+            <input type="text" id="f-referrer-search" placeholder="紹介してくれた会員の名前・電話番号で検索" autocomplete="off">
+            <div class="referrer-results" id="referrerResults" hidden></div>
+            <div class="referrer-chip" id="referrerChip" hidden>
+              <span id="referrerChipName"></span>
+              <button type="button" class="rr-clear" id="referrerClear" aria-label="紹介者をクリア">×</button>
+            </div>
+          </div>
+        </label>
+        <input type="hidden" id="f-referrer-id" name="referrerId" value="">
+        <p class="hint">紹介者を選ぶと、本人が来店した時点で紹介者にボーナススタンプが付きます(不正防止のため、登録しただけでは付与されません)。</p>
+
+        <button type="submit" class="btn btn-primary">この内容で登録する</button>
+        <p class="hint">登録後は「会員一覧」からいつでも来店記録・編集ができます。</p>
+      </form>
+    `;
+  }
+
+  function bindNewMemberForm(root) {
+    const form = root.querySelector("#newMemberForm");
+    if (!form) return;
+
+    // ---- 本人確認書類の撮影 ----
+    let idDocDraft = null; // { image } or null
+    const $idType = form.querySelector("#f-id-type");
+    const $idFile = form.querySelector("#f-id-file");
+    const $idCapture = form.querySelector("#f-id-capture");
+    const $idClear = form.querySelector("#f-id-clear");
+    const $idPreviewWrap = form.querySelector("#f-id-preview-wrap");
+    const $idPreview = form.querySelector("#f-id-preview");
+    $idCapture.addEventListener("click", () => $idFile.click());
+    $idFile.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      compressImageFile(file, 1000, 0.7, (dataUrl) => {
+        $idFile.value = "";
+        if (!dataUrl) { showToast("画像を読み込めませんでした"); return; }
+        idDocDraft = { image: dataUrl };
+        $idPreview.src = dataUrl;
+        $idPreviewWrap.hidden = false;
+        $idClear.hidden = false;
+      });
+    });
+    $idClear.addEventListener("click", () => {
+      idDocDraft = null;
+      $idPreview.src = "";
+      $idPreviewWrap.hidden = true;
+      $idClear.hidden = true;
+    });
+
+    // ---- referrer picker ----
+    const $refSearch = form.querySelector("#f-referrer-search");
+    const $refResults = form.querySelector("#referrerResults");
+    const $refChip = form.querySelector("#referrerChip");
+    const $refChipName = form.querySelector("#referrerChipName");
+    const $refClear = form.querySelector("#referrerClear");
+    const $refId = form.querySelector("#f-referrer-id");
+    const $phone = form.querySelector("#f-phone");
+    const $phoneMark = form.querySelector("#phoneRequiredMark");
+
+    function setReferrer(member) {
+      $refId.value = member.id;
+      $refChipName.textContent = `${member.name || "名前未設定"}さん`;
+      $refChip.hidden = false;
+      $refSearch.hidden = true;
+      $refResults.hidden = true;
+      $phone.required = true;
+      $phoneMark.hidden = false;
+    }
+    function clearReferrer() {
+      $refId.value = "";
+      $refChip.hidden = true;
+      $refSearch.hidden = false;
+      $refSearch.value = "";
+      $refResults.hidden = true;
+      $phone.required = false;
+      $phoneMark.hidden = true;
+    }
+    $refClear.addEventListener("click", clearReferrer);
+    $refSearch.addEventListener("input", () => {
+      const q = $refSearch.value.trim().toLowerCase();
+      if (!q) { $refResults.hidden = true; $refResults.innerHTML = ""; return; }
+      const matches = state.members.filter((m) =>
+        (m.name || "").toLowerCase().includes(q) || normalizePhone(m.phone).includes(normalizePhone(q))
+      ).slice(0, 6);
+      if (!matches.length) {
+        $refResults.innerHTML = `<div class="rr-empty">該当する会員が見つかりません</div>`;
+      } else {
+        $refResults.innerHTML = matches.map((m) => `
+          <div class="rr-item" data-id="${m.id}">
+            <span>${escapeHtml(m.name || "名前未設定")}</span>
+            <span class="rr-sub">${escapeHtml(m.phone || "")}</span>
+          </div>
+        `).join("");
+        $refResults.querySelectorAll(".rr-item").forEach((el) => {
+          el.addEventListener("click", () => {
+            const member = state.members.find((x) => x.id === el.dataset.id);
+            if (member) setReferrer(member);
+          });
+        });
+      }
+      $refResults.hidden = false;
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      const name = (fd.get("name") || "").toString().trim();
+      if (!name) return;
+      const phone = (fd.get("phone") || "").toString().trim();
+      const referrerId = (fd.get("referrerId") || "").toString().trim();
+
+      // ---- 不正防止: 電話番号の重複チェック ----
+      const dup = findMemberByPhone(phone);
+      if (dup) {
+        showToast("この電話番号はすでに登録されています(重複登録はできません)");
+        return;
+      }
+      // ---- 不正防止: 紹介登録には電話番号を必須にする ----
+      if (referrerId && !phone) {
+        showToast("紹介登録には電話番号の入力が必要です");
+        return;
+      }
+      // ---- なりすまし・年齢詐称防止: 本人確認書類の撮影を必須にする ----
+      if (!idDocDraft) {
+        showToast("本人確認書類(免許証・学生証・保険証など)の撮影が必要です");
+        return;
+      }
+
+      let referredBy = null;
+      if (referrerId) {
+        const referrer = state.members.find((m) => m.id === referrerId);
+        if (referrer) referredBy = { id: referrer.id, name: referrer.name || "" };
+      }
+
+      const submitBtn = form.querySelector("button[type=submit]");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "登録中…";
+      try {
+        const newMemberData = {
+          name,
+          phone,
+          address: (fd.get("address") || "").toString().trim(),
+          birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
+          birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,
+          birthDay: fd.get("birthDay") ? Number(fd.get("birthDay")) : null,
+          memo: (fd.get("memo") || "").toString().trim(),
+          points: referredBy ? REFERRAL_WELCOME_POINTS : 0,
+          totalPointsEarned: referredBy ? REFERRAL_WELCOME_POINTS : 0,
+          visitCount: 0,
+          totalSpend: 0,
+          visits: [],
+          referredBy,
+          referralBonusGranted: false,
+          referralLog: [],
+          createdAt: new Date().toISOString(),
+          idDocument: idDocDraft ? { type: $idType.value || "other", image: idDocDraft.image, uploadedAt: new Date().toISOString() } : null,
+        };
+        const ref = await state.db.collection("members").add(newMemberData);
+        showToast(referredBy ? `「${name}」さんを登録しました(紹介特典+${REFERRAL_WELCOME_POINTS})` : `「${name}」さんを登録しました`);
+        if (!state.publicJoinMode) {
+          document.querySelector('nav.tabs button[data-tab="list"]').click();
+        }
+        // 登録直後に、この会員専用の入店QRをその場で発行して見せる
+        openMemberEntryQRSheet({ id: ref.id, ...newMemberData });
+        if (state.publicJoinMode) {
+          // 次のお客様のために、登録フォームを空の状態に戻しておく
+          render();
+        }
+      } catch (err) {
+        showToast("登録に失敗しました。もう一度お試しください。");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "この内容で登録する";
+      }
+    });
+  }
+
+  // ---------- 売上(オーナー専用) ----------
+  function todayDateStr() {
+    return new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+  }
+  function allTransactions() {
+    // 会員の来店記録は visitLog(全件保存)を正として集計する。
+    // member.visits は直近15件しか保存しないため、来店頻度が高い会員ほど
+    // 古い記録がそちらには残らない(detailシートでの表示専用として使う)。
+    const list = [];
+    state.guestSales.forEach((g) => {
+      list.push({
+        date: g.date || "",
+        amount: Number(g.amount) || 0,
+        label: "一般客(非会員)",
+        sub: g.note || "",
+        createdAt: g.createdAt || "",
+      });
+    });
+    state.visitLog.forEach((v) => {
+      list.push({
+        date: v.date || "",
+        amount: Number(v.amount) || 0,
+        label: v.memberName || "名前未設定",
+        sub: v.note || "",
+        createdAt: v.createdAt || "",
+      });
+    });
+    return list;
+  }
+  function salesTabHtml() {
+    const txns = allTransactions();
+    const today = todayDateStr();
+    const thisMonth = today.slice(0, 7);
+
+    const dailyMap = {};
+    txns.forEach((t) => {
+      if (!t.date) return;
+      if (!dailyMap[t.date]) dailyMap[t.date] = { total: 0, count: 0 };
+      dailyMap[t.date].total += t.amount;
+      dailyMap[t.date].count += 1;
+    });
+
+    const todayInfo = dailyMap[today] || { total: 0, count: 0 };
+    const monthTotal = Object.keys(dailyMap)
+      .filter((d) => d.startsWith(thisMonth))
+      .reduce((s, d) => s + dailyMap[d].total, 0);
+
+    const days = Object.keys(dailyMap).sort().reverse().slice(0, 14);
+
+    const recentTxns = txns
+      .filter((t) => t.date)
+      .sort((a, b) => (a.createdAt || a.date).localeCompare(b.createdAt || b.date))
+      .reverse()
+      .slice(0, 30);
+
+    if (!state.guestSalesReady || !state.visitLogReady) {
+      return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+    }
+
+    return `
+      <div class="reg-total-box" style="margin-top:0;">
+        <div>
+          <div class="reg-total-label">本日の売上(${escapeHtml(today)})</div>
+          <div class="hint" style="margin-top:2px;">${todayInfo.count}件</div>
+        </div>
+        <div class="reg-total-amount">¥${todayInfo.total.toLocaleString()}</div>
+      </div>
+
+      <div class="detail-stats" style="margin-top:14px;">
+        <div class="box">
+          <div class="n num">¥${monthTotal.toLocaleString()}</div>
+          <div class="l">今月の累計</div>
+        </div>
+        <div class="box">
+          <div class="n num">${state.members.length}</div>
+          <div class="l">会員数</div>
+        </div>
+        <div class="box">
+          <div class="n num">${txns.length}</div>
+          <div class="l">総来店・会計件数</div>
+        </div>
+      </div>
+
+      <div class="section-title">日別売上(直近14日)</div>
+      ${days.length ? `
+        <ul class="visit-log">
+          ${days.map((d) => `<li><span>${escapeHtml(d)}(${dailyMap[d].count}件)</span><span class="amt">¥${dailyMap[d].total.toLocaleString()}</span></li>`).join("")}
+        </ul>
+      ` : `<p class="hint">まだ売上データがありません。</p>`}
+
+      <div class="section-title">最近の会計・来店記録</div>
+      ${recentTxns.length ? `
+        <ul class="visit-log">
+          ${recentTxns.map((t) => `<li><span>${escapeHtml(t.date)}・${escapeHtml(t.label)}${t.sub ? "・" + escapeHtml(t.sub) : ""}</span><span class="amt">${t.amount ? "¥" + t.amount.toLocaleString() : "—"}</span></li>`).join("")}
+        </ul>
+      ` : `<p class="hint">来店記録がありません。</p>`}
+      <p class="hint" style="margin-top:14px;">※ 会員ごとの来店記録は直近15件まで保存されます。それより古い記録は集計に含まれません。</p>
+    `;
+  }
+
+  // ---------- 分析・経営戦略(オーナー専用) ----------
+  const WEEKDAY_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+
+  function monthKeyOf(dateStr) {
+    return (dateStr || "").slice(0, 7); // "YYYY/MM"
+  }
+  function lastNMonthKeys(n) {
+    const keys = [];
+    const now = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mo = String(dt.getMonth() + 1).padStart(2, "0");
+      keys.push(`${dt.getFullYear()}/${mo}`);
+    }
+    return keys;
+  }
+  function weekdayOf(dateStr) {
+    if (!dateStr) return null;
+    const parsed = new Date(dateStr);
+    return isNaN(parsed.getTime()) ? null : parsed.getDay();
+  }
+  function yearKeyOf(dateStr) {
+    return (dateStr || "").slice(0, 4); // "YYYY"
+  }
+  function lastNYearKeys(n) {
+    const keys = [];
+    const thisYear = new Date().getFullYear();
+    for (let i = n - 1; i >= 0; i--) keys.push(String(thisYear - i));
+    return keys;
+  }
+  // 今日が「その年の何日目か」を基準に、今年の年初〜今日 と 去年の年初〜同じ日数 を比較する
+  // (1年の途中で比べても公平になるよう、同じ期間同士で比較する)
+  function dayOfYear(d) {
+    const start = new Date(d.getFullYear(), 0, 1);
+    return Math.floor((d - start) / (24 * 60 * 60 * 1000)) + 1;
+  }
+  function yearToDateTotal(txns, year, uptoDayOfYear) {
+    let total = 0;
+    txns.forEach((t) => {
+      if (yearKeyOf(t.date) !== String(year)) return;
+      const d = new Date(t.date);
+      if (isNaN(d.getTime())) return;
+      if (dayOfYear(d) <= uptoDayOfYear) total += t.amount;
+    });
+    return total;
+  }
+  function barRowHtml(label, value, max, valueText) {
+    const pct = max > 0 ? Math.max(0, Math.min(100, Math.round((value / max) * 100))) : 0;
+    return `
+      <div class="bar-row">
+        <span class="bar-label">${escapeHtml(label)}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <span class="bar-value">${escapeHtml(valueText)}</span>
+      </div>
+    `;
+  }
+  function dormantMembers() {
+    const now = Date.now();
+    const list = [];
+    state.members.forEach((m) => {
+      const visits = m.visits || [];
+      if (!visits.length) {
+        list.push({ m, daysSince: null });
+        return;
+      }
+      const last = visits[visits.length - 1];
+      const lastDate = new Date(last.date);
+      if (isNaN(lastDate.getTime())) return;
+      const days = Math.floor((now - lastDate.getTime()) / (24 * 60 * 60 * 1000));
+      if (days >= 60) list.push({ m, daysSince: days });
+    });
+    return list.sort((a, b) => (b.daysSince == null ? 1 : b.daysSince) - (a.daysSince == null ? 1 : a.daysSince)).slice(0, 12);
+  }
+  function referralLeaders() {
+    return state.members
+      .map((m) => ({ m, count: referredCountOf(m.id) }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }
+  function analysisTabHtml() {
+    if (!state.guestSalesReady || !state.visitLogReady) {
+      return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+    }
+    const txns = allTransactions();
+
+    // 月別売上推移(直近6ヶ月)
+    const monthKeys = lastNMonthKeys(6);
+    const monthTotals = {};
+    monthKeys.forEach((k) => { monthTotals[k] = 0; });
+    txns.forEach((t) => {
+      const k = monthKeyOf(t.date);
+      if (k in monthTotals) monthTotals[k] += t.amount;
+    });
+    const maxMonth = Math.max(1, ...monthKeys.map((k) => monthTotals[k]));
+    const thisMonthKey = monthKeys[monthKeys.length - 1];
+    const prevMonthKey = monthKeys[monthKeys.length - 2];
+    const momDiff = prevMonthKey ? monthTotals[thisMonthKey] - monthTotals[prevMonthKey] : null;
+    const momPct = prevMonthKey && monthTotals[prevMonthKey] > 0
+      ? Math.round((momDiff / monthTotals[prevMonthKey]) * 100)
+      : null;
+
+    // 年別売上推移・前年同期比
+    const yearKeys = lastNYearKeys(5);
+    const yearTotals = {};
+    yearKeys.forEach((y) => { yearTotals[y] = 0; });
+    txns.forEach((t) => {
+      const y = yearKeyOf(t.date);
+      if (y in yearTotals) yearTotals[y] += t.amount;
+    });
+    const maxYear = Math.max(1, ...yearKeys.map((y) => yearTotals[y]));
+    const now = new Date();
+    const thisYear = now.getFullYear();
+    const lastYear = thisYear - 1;
+    const todayDoY = dayOfYear(now);
+    const ytdThisYear = yearToDateTotal(txns, thisYear, todayDoY);
+    const ytdLastYear = yearToDateTotal(txns, lastYear, todayDoY);
+    const yoyDiff = ytdThisYear - ytdLastYear;
+    const yoyPct = ytdLastYear > 0 ? Math.round((yoyDiff / ytdLastYear) * 100) : null;
+
+    // 曜日別の傾向
+    const weekdayTotals = [0, 0, 0, 0, 0, 0, 0];
+    const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
+    txns.forEach((t) => {
+      const wd = weekdayOf(t.date);
+      if (wd == null) return;
+      weekdayTotals[wd] += t.amount;
+      weekdayCounts[wd] += 1;
+    });
+    const maxWeekday = Math.max(1, ...weekdayTotals);
+
+    // 客単価・リピート率
+    const avgSpend = txns.length ? Math.round(txns.reduce((s, t) => s + t.amount, 0) / txns.length) : 0;
+    const repeatCount = state.members.filter((m) => (m.visitCount || 0) >= 2).length;
+    const repeatRate = state.members.length ? Math.round((repeatCount / state.members.length) * 100) : 0;
+
+    // 会員ランク構成
+    const tierCounts = { vip: 0, gold: 0, regular: 0 };
+    state.members.forEach((m) => { tierCounts[tierOf(m).key] += 1; });
+    const memberCountForPct = Math.max(1, state.members.length);
+
+    const dormant = dormantMembers();
+    const referrers = referralLeaders();
+
+    return `
+      <div class="section-title">月別売上推移(直近6ヶ月)</div>
+      <div class="bar-list">
+        ${monthKeys.map((k) => barRowHtml(k, monthTotals[k], maxMonth, "¥" + monthTotals[k].toLocaleString())).join("")}
+      </div>
+      ${momPct != null ? `
+        <p class="hint">前月比 ${momDiff >= 0 ? "+" : ""}¥${momDiff.toLocaleString()}(${momPct >= 0 ? "+" : ""}${momPct}%)</p>
+      ` : ""}
+
+      <div class="section-title">年別売上推移(直近5年)</div>
+      <div class="bar-list">
+        ${yearKeys.map((y) => barRowHtml(y + "年", yearTotals[y], maxYear, "¥" + yearTotals[y].toLocaleString())).join("")}
+      </div>
+
+      <div class="section-title">前年同期比(${escapeHtml(String(thisYear))}年1/1〜本日 vs ${escapeHtml(String(lastYear))}年同期間)</div>
+      <div class="detail-stats" style="margin-top:0;">
+        <div class="box"><div class="n num">¥${ytdThisYear.toLocaleString()}</div><div class="l">${escapeHtml(String(thisYear))}年(今年)</div></div>
+        <div class="box"><div class="n num">¥${ytdLastYear.toLocaleString()}</div><div class="l">${escapeHtml(String(lastYear))}年(去年同期間)</div></div>
+        <div class="box"><div class="n num">${yoyPct == null ? "—" : (yoyPct >= 0 ? "+" : "") + yoyPct + "%"}</div><div class="l">前年同期比</div></div>
+      </div>
+      <p class="hint">${yoyPct == null ? "去年同期間の売上データがまだありません。" : `今年は去年の同じ期間と比べて${yoyDiff >= 0 ? "+" : ""}¥${yoyDiff.toLocaleString()}(${yoyPct >= 0 ? "+" : ""}${yoyPct}%)です。`}</p>
+
+      <div class="section-title">曜日別の傾向(直近の会計記録より)</div>
+      <div class="bar-list">
+        ${WEEKDAY_LABELS.map((label, i) => barRowHtml(
+          label + "曜",
+          weekdayTotals[i],
+          maxWeekday,
+          "¥" + weekdayTotals[i].toLocaleString() + "(" + weekdayCounts[i] + "件)"
+        )).join("")}
+      </div>
+      <p class="hint">※ 売上が多い・少ない曜日が分かれば、仕込みの量やスタッフの人数、曜日限定の企画の判断に使えます。</p>
+
+      <div class="detail-stats" style="margin-top:16px;">
+        <div class="box"><div class="n num">¥${avgSpend.toLocaleString()}</div><div class="l">客単価(平均)</div></div>
+        <div class="box"><div class="n num">${repeatRate}%</div><div class="l">リピート率</div></div>
+        <div class="box"><div class="n num">${state.members.length}</div><div class="l">総会員数</div></div>
+      </div>
+
+      <div class="section-title">会員ランク構成</div>
+      <div class="bar-list">
+        ${barRowHtml("VIP", tierCounts.vip, memberCountForPct, tierCounts.vip + "人")}
+        ${barRowHtml("GOLD", tierCounts.gold, memberCountForPct, tierCounts.gold + "人")}
+        ${barRowHtml("REGULAR", tierCounts.regular, memberCountForPct, tierCounts.regular + "人")}
+      </div>
+      <p class="hint">GOLD・VIPの比率が増えるほど、常連客を軸にした経営に近づいています。</p>
+
+      <div class="section-title">紹介で会員を増やしてくれている人 TOP5</div>
+      ${referrers.length ? `
+        <ul class="visit-log">
+          ${referrers.map((r) => `<li><span>${escapeHtml(r.m.name || "名前未設定")}</span><span class="amt">${r.count}人紹介</span></li>`).join("")}
+        </ul>
+        <p class="hint">特典や次回クーポンでお礼をすると、紹介がさらに増えやすくなります。</p>
+      ` : `<p class="hint">まだ紹介で登録した会員がいません。</p>`}
+
+      <div class="section-title">来店が途絶えているお客様(60日以上来店なし)</div>
+      ${dormant.length ? `
+        <ul class="visit-log">
+          ${dormant.map((d) => `<li><span>${escapeHtml(d.m.name || "名前未設定")}</span><span class="amt">${d.daysSince == null ? "来店記録なし" : d.daysSince + "日前"}</span></li>`).join("")}
+        </ul>
+        <p class="hint">DMやクーポン配布など、再来店を促す施策の対象リストとして活用できます。</p>
+      ` : `<p class="hint">直近60日以内に来店していない会員はいません。</p>`}
+    `;
+  }
+
+  // ---------- register (会計) ----------
+  function registerTabHtml() {
+    const reg = state.register;
+    const total = registerTotal(reg);
+    const canConfirm = (reg.memberId || reg.guest) && registerHasItems(reg);
+
+    let targetHtml;
+    if (reg.guest) {
+      targetHtml = `
+        <div class="referrer-chip" style="background: var(--bg-elev-2); border-color: var(--line);">
+          <span>一般客(非会員)として記録</span>
+          <button type="button" class="rr-clear" id="regGuestClear" aria-label="クリア">×</button>
+        </div>
+      `;
+    } else if (reg.memberId) {
+      targetHtml = `
+        <div class="referrer-chip">
+          <span>${escapeHtml(reg.memberLabel)}さん</span>
+          <button type="button" class="rr-clear" id="regMemberClear" aria-label="クリア">×</button>
+        </div>
+      `;
+    } else {
+      targetHtml = `
+        <button type="button" class="btn btn-primary" id="regQrBtn" style="width:100%;">📷 会員証QRを読み取る</button>
+        <input type="file" accept="image/*" capture="environment" id="regQrFile" style="display:none;">
+        <div class="referrer-picker" style="margin-top:8px;">
+          <input type="text" id="regMemberSearch" placeholder="会員を名前・電話番号で検索" value="${escapeHtml(reg.memberQuery || "")}" autocomplete="off">
+          <div class="referrer-results" id="regMemberResults" ${reg.memberQuery ? "" : "hidden"}></div>
+        </div>
+        <button type="button" class="btn btn-ghost" id="regGuestBtn" style="margin-top:8px;width:100%;">会員を選ばず一般客として記録する</button>
+      `;
+    }
+
+    return `
+      <div class="reg-wrap">
+        <div class="section-title">飲み放題(90分) 人数</div>
+        <div class="reg-menu-grid">
+          ${COURSES.map((c) => {
+            const n = reg.course[c.key] || 0;
+            return `
+              <div class="reg-menu-item">
+                <div class="reg-menu-label"><span>${c.label}</span><span class="reg-menu-price">¥${c.price.toLocaleString()}</span></div>
+                <div class="reg-stepper reg-stepper-sm">
+                  <button type="button" class="reg-step-btn" data-course-minus="${c.key}" ${n <= 0 ? "disabled" : ""}>−</button>
+                  <div class="reg-step-val"><span class="num">${n}</span><span class="reg-step-unit">名</span></div>
+                  <button type="button" class="reg-step-btn" data-course-plus="${c.key}">＋</button>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+
+        <div class="section-title">延長(1時間 ¥${EXTENSION_PRICE.toLocaleString()})</div>
+        <div class="reg-stepper">
+          <button type="button" class="reg-step-btn" id="extMinus" ${reg.extensions <= 0 ? "disabled" : ""}>−</button>
+          <div class="reg-step-val"><span class="num">${reg.extensions}</span><span class="reg-step-unit">時間</span></div>
+          <button type="button" class="reg-step-btn" id="extPlus">＋</button>
+          <div class="reg-step-sub num">¥${(reg.extensions * EXTENSION_PRICE).toLocaleString()}</div>
+        </div>
+
+        <div class="section-title">単品 人数(チャージ料 ¥${TANPIN_CHARGE.toLocaleString()}/人)</div>
+        <div class="reg-stepper">
+          <button type="button" class="reg-step-btn" id="tanpinMinus" ${reg.tanpinCount <= 0 ? "disabled" : ""}>−</button>
+          <div class="reg-step-val"><span class="num">${reg.tanpinCount}</span><span class="reg-step-unit">名</span></div>
+          <button type="button" class="reg-step-btn" id="tanpinPlus">＋</button>
+          <div class="reg-step-sub num">¥${(reg.tanpinCount * TANPIN_CHARGE).toLocaleString()}</div>
+        </div>
+
+        <div class="section-title">ゲーム・ダーツ・カラオケ(込みで¥${GAME_ITEMS[0].price.toLocaleString()})</div>
+        <div class="reg-stepper">
+          <button type="button" class="reg-step-btn" data-menu-minus="${GAME_ITEMS[0].key}" ${(reg.menu[GAME_ITEMS[0].key] || 0) <= 0 ? "disabled" : ""}>−</button>
+          <div class="reg-step-val"><span class="num">${reg.menu[GAME_ITEMS[0].key] || 0}</span></div>
+          <button type="button" class="reg-step-btn" data-menu-plus="${GAME_ITEMS[0].key}">＋</button>
+          <div class="reg-step-sub num">¥${((reg.menu[GAME_ITEMS[0].key] || 0) * GAME_ITEMS[0].price).toLocaleString()}</div>
+        </div>
+
+        <div class="section-title">追加メニュー</div>
+        <div class="reg-menu-grid">
+          ${MENU_ITEMS.map((it) => {
+            const n = reg.menu[it.key] || 0;
+            return `
+              <div class="reg-menu-item">
+                <div class="reg-menu-label"><span>${it.label}</span><span class="reg-menu-price">¥${it.price}</span></div>
+                <div class="reg-stepper reg-stepper-sm">
+                  <button type="button" class="reg-step-btn" data-menu-minus="${it.key}" ${n <= 0 ? "disabled" : ""}>−</button>
+                  <div class="reg-step-val"><span class="num">${n}</span></div>
+                  <button type="button" class="reg-step-btn" data-menu-plus="${it.key}">＋</button>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+
+        <div class="section-title">その他(手入力)</div>
+        <div class="reg-custom-row">
+          <input type="text" id="regCustomLabel" placeholder="品名(任意)">
+          <input type="number" id="regCustomAmount" placeholder="金額" min="0" step="1">
+          <button type="button" class="btn btn-ghost" id="regCustomAdd">追加</button>
+        </div>
+        ${reg.customItems.length ? `
+          <ul class="reg-custom-list">
+            ${reg.customItems.map((c, i) => `
+              <li>
+                <span>${escapeHtml(c.label || "その他")}</span>
+                <span class="amt num">¥${(Number(c.amount) || 0).toLocaleString()}</span>
+                <button type="button" class="rr-clear" data-custom-remove="${i}" aria-label="削除">×</button>
+              </li>
+            `).join("")}
+          </ul>
+        ` : ""}
+
+        <div class="section-title">会計対象</div>
+        ${targetHtml}
+
+        <div class="reg-total-box">
+          <div class="reg-total-label">合計金額</div>
+          <div class="reg-total-amount num">¥${total.toLocaleString()}</div>
+        </div>
+
+        <div class="action-row">
+          <button type="button" class="btn btn-primary" id="regConfirm" ${canConfirm ? "" : "disabled"}>会計確定</button>
+        </div>
+        <p class="hint">会員を選んで確定すると、来店履歴・スタンプ・ランクに自動反映されます。一般客として記録した会計は売上集計にのみ含まれます。</p>
+      </div>
+    `;
+  }
+
+  function bindRegisterTab(root) {
+    const reg = state.register;
+
+    root.querySelectorAll("[data-course-plus]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.coursePlus;
+        reg.course[key] = (reg.course[key] || 0) + 1;
+        render();
+      });
+    });
+    root.querySelectorAll("[data-course-minus]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.courseMinus;
+        reg.course[key] = Math.max(0, (reg.course[key] || 0) - 1);
+        render();
+      });
+    });
+
+    const $tanpinMinus = root.querySelector("#tanpinMinus");
+    const $tanpinPlus = root.querySelector("#tanpinPlus");
+    if ($tanpinMinus) $tanpinMinus.addEventListener("click", () => { reg.tanpinCount = Math.max(0, reg.tanpinCount - 1); render(); });
+    if ($tanpinPlus) $tanpinPlus.addEventListener("click", () => { reg.tanpinCount += 1; render(); });
+
+    const $extMinus = root.querySelector("#extMinus");
+    const $extPlus = root.querySelector("#extPlus");
+    if ($extMinus) $extMinus.addEventListener("click", () => { reg.extensions = Math.max(0, reg.extensions - 1); render(); });
+    if ($extPlus) $extPlus.addEventListener("click", () => { reg.extensions += 1; render(); });
+
+    root.querySelectorAll("[data-menu-plus]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.menuPlus;
+        reg.menu[key] = (reg.menu[key] || 0) + 1;
+        render();
+      });
+    });
+    root.querySelectorAll("[data-menu-minus]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.menuMinus;
+        reg.menu[key] = Math.max(0, (reg.menu[key] || 0) - 1);
+        render();
+      });
+    });
+
+    const $customAdd = root.querySelector("#regCustomAdd");
+    if ($customAdd) {
+      $customAdd.addEventListener("click", () => {
+        const $label = root.querySelector("#regCustomLabel");
+        const $amount = root.querySelector("#regCustomAmount");
+        const amount = Number($amount.value);
+        if (!amount || amount <= 0) { showToast("金額を入力してください"); return; }
+        reg.customItems.push({ label: ($label.value || "").trim(), amount });
+        render();
+      });
+    }
+    root.querySelectorAll("[data-custom-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        reg.customItems.splice(Number(btn.dataset.customRemove), 1);
+        render();
+      });
+    });
+
+    const $guestBtn = root.querySelector("#regGuestBtn");
+    if ($guestBtn) $guestBtn.addEventListener("click", () => { reg.guest = true; render(); });
+    const $guestClear = root.querySelector("#regGuestClear");
+    if ($guestClear) $guestClear.addEventListener("click", () => { reg.guest = false; render(); });
+    const $memberClear = root.querySelector("#regMemberClear");
+    if ($memberClear) $memberClear.addEventListener("click", () => { reg.memberId = null; reg.memberLabel = ""; reg.memberQuery = ""; render(); });
+
+    const $qrBtn = root.querySelector("#regQrBtn");
+    const $qrFile = root.querySelector("#regQrFile");
+    if ($qrBtn && $qrFile) {
+      $qrBtn.addEventListener("click", () => $qrFile.click());
+      $qrFile.addEventListener("change", (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        decodeMemberQrFile(file, (member) => {
+          $qrFile.value = "";
+          if (member) {
+            reg.memberId = member.id;
+            reg.memberLabel = member.name || "名前未設定";
+            reg.memberQuery = "";
+            showToast(`${member.name || "会員"}さんを読み取りました`);
+            render();
+          } else {
+            showToast("QRコードを認識できませんでした。もう一度お試しください。");
+          }
+        });
+      });
+    }
+
+    const $memberSearch = root.querySelector("#regMemberSearch");
+    const $memberResults = root.querySelector("#regMemberResults");
+    if ($memberSearch) {
+      $memberSearch.addEventListener("input", (e) => {
+        reg.memberQuery = e.target.value;
+        const q = reg.memberQuery.trim().toLowerCase();
+        if (!q) { $memberResults.hidden = true; $memberResults.innerHTML = ""; return; }
+        const matches = state.members.filter((m) =>
+          (m.name || "").toLowerCase().includes(q) || normalizePhone(m.phone).includes(normalizePhone(q))
+        ).slice(0, 6);
+        if (!matches.length) {
+          $memberResults.innerHTML = `<div class="rr-empty">該当する会員が見つかりません</div>`;
+        } else {
+          $memberResults.innerHTML = matches.map((m) => `
+            <div class="rr-item" data-id="${m.id}">
+              <span>${escapeHtml(m.name || "名前未設定")}</span>
+              <span class="rr-sub">${escapeHtml(m.phone || "")}</span>
+            </div>
+          `).join("");
+          $memberResults.querySelectorAll(".rr-item").forEach((el) => {
+            el.addEventListener("click", () => {
+              const member = state.members.find((x) => x.id === el.dataset.id);
+              if (member) {
+                reg.memberId = member.id;
+                reg.memberLabel = member.name || "名前未設定";
+                reg.memberQuery = "";
+                render();
+              }
+            });
+          });
+        }
+        $memberResults.hidden = false;
+      });
+      const pos = $memberSearch.value.length;
+      $memberSearch.focus();
+      $memberSearch.setSelectionRange(pos, pos);
+    }
+
+    const $confirm = root.querySelector("#regConfirm");
+    if ($confirm) {
+      $confirm.addEventListener("click", async () => {
+        $confirm.disabled = true;
+        const total = registerTotal(reg);
+        const note = registerBreakdownText(reg);
+        try {
+          if (reg.memberId) {
+            const member = state.members.find((x) => x.id === reg.memberId);
+            if (!member) { showToast("会員情報が見つかりません"); $confirm.disabled = false; return; }
+            await recordVisit(member, total, note);
+            showToast(`${member.name || "会員"}さんの会計(¥${total.toLocaleString()})を記録しました`);
+          } else {
+            await state.db.collection("guestSales").add({
+              amount: total,
+              note,
+              date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
+              createdAt: new Date().toISOString(),
+            });
+            showToast(`一般客の会計(¥${total.toLocaleString()})を記録しました`);
+          }
+          state.register = createEmptyRegister();
+          render();
+        } catch (err) {
+          showToast("記録に失敗しました。もう一度お試しください。");
+          $confirm.disabled = false;
+        }
+      });
+    }
+  }
+
+  // ---------- member detail ----------
+  function openMemberDetail(id) {
+    const m = state.members.find((x) => x.id === id);
+    if (!m) return;
+    renderMemberDetail(m);
+  }
+
+  function renderMemberDetail(m) {
+    const pts = m.points || 0;
+    const untilReward = REWARD_THRESHOLD - (pts % REWARD_THRESHOLD);
+    const readyForReward = pts > 0 && pts % REWARD_THRESHOLD === 0;
+    const pct = readyForReward ? 100 : Math.round(((pts % REWARD_THRESHOLD) / REWARD_THRESHOLD) * 100);
+    const bdayText = birthdayTextOf(m);
+    const age = ageOf(m);
+    const visits = (m.visits || []).slice().reverse();
+    const dialId = "d" + m.id.replace(/[^a-zA-Z0-9]/g, "");
+
+    const html = `
+      <div class="sheet-header">
+        <h2>${escapeHtml(m.name || "名前未設定")}</h2>
+        <button class="sheet-close" id="closeDetail" aria-label="閉じる">×</button>
+      </div>
+
+      <div class="phoenix-card tier-${tierOf(m).key}" data-tier-label="${escapeHtml(tierOf(m).label)}">
+        <div class="pc-head">
+          <div class="pc-side-btn">${escapeHtml(tierOf(m).label.slice(0, 1))}</div>
+          <div class="pc-rating-ring">
+            <div class="pc-rating-label">RATING</div>
+            <div class="pc-rating-num">${pts}</div>
+          </div>
+          <div class="pc-side-btn pc-chevron">›</div>
+        </div>
+        <div class="pc-profile">
+          <div class="pc-avatar">${escapeHtml(initials(m.name))}</div>
+          <div class="pc-name">${escapeHtml(m.name || "名前未設定")}</div>
+          <div class="pc-sub">${tierNextInfo(m)}</div>
+        </div>
+        <div class="pc-stats-row">
+          <div class="pc-stat"><div class="pc-stat-circle">${m.visitCount || 0}回</div><div class="pc-stat-label">来店回数</div></div>
+          <div class="pc-stat"><div class="pc-stat-circle">¥${(m.totalSpend || 0).toLocaleString()}</div><div class="pc-stat-label">累計利用</div></div>
+          <div class="pc-stat"><div class="pc-stat-circle">${referredCountOf(m.id)}人</div><div class="pc-stat-label">紹介人数</div></div>
+        </div>
+      </div>
+
+      <div class="dial-wrap">
+        <div class="dial">
+          ${dialSvg(pct, dialId)}
+          <div class="dial-center"><div class="n num">${pts}</div><div class="l">STAMPS</div></div>
+        </div>
+        <div class="dial-info">
+          <div class="reward-name">🎁 ${escapeHtml(REWARD_LABEL)}</div>
+          ${readyForReward
+            ? `<div class="reward-ready">特典が利用可能です</div>`
+            : `<div class="reward-sub">あと${untilReward}回の来店で特典</div>`}
+        </div>
+      </div>
+
+      <div class="section-title">来店を記録</div>
+      <form class="visit-form" id="visitForm">
+        <input type="number" id="f-visit-amount" name="amount" placeholder="利用金額(円・任意)" min="0">
+        <button type="submit" class="btn btn-primary" style="flex:none;">＋来店</button>
+      </form>
+      ${readyForReward ? `<button class="btn btn-ghost" id="redeemBtn" style="width:100%;margin-top:4px;">特典を利用済みにする</button>` : ""}
+
+      <div class="section-title">連絡先・メモ</div>
+      <p class="hint">電話: ${escapeHtml(m.phone || "未登録")} ／ 誕生日: ${bdayText}${age != null ? `(満${age}歳)` : ""}</p>
+      <p class="hint">住所: ${escapeHtml(m.address || "未登録")}</p>
+      ${m.memo ? `<p class="hint">メモ: ${escapeHtml(m.memo)}</p>` : ""}
+      ${m.referredBy ? `<p class="hint">紹介者: ${escapeHtml(m.referredBy.name || "")}さん${m.referralBonusGranted ? "(ボーナス処理済み)" : "(初来店でボーナス付与予定)"}</p>` : ""}
+
+      ${m.idDocument && m.idDocument.image ? `
+        <div class="section-title">本人確認書類</div>
+        <div class="id-doc-row">
+          <img src="${m.idDocument.image}" alt="本人確認書類" class="id-doc-thumb" id="idDocThumb">
+          <div class="id-doc-meta">
+            <div class="hint">${escapeHtml(idDocTypeLabel(m.idDocument.type))}${m.idDocument.uploadedAt ? "・" + escapeHtml(new Date(m.idDocument.uploadedAt).toLocaleDateString("ja-JP")) : ""}</div>
+            <button type="button" class="btn btn-ghost" id="idDocExpandBtn" style="margin-top:6px;">拡大表示</button>
+          </div>
+        </div>
+      ` : ""}
+
+      ${visits.length ? `
+        <div class="section-title">来店履歴</div>
+        <ul class="visit-log">
+          ${visits.map((v) => `<li><span>${escapeHtml(v.date)}${v.note ? "・" + escapeHtml(v.note) : ""}</span><span class="amt">${v.amount ? "¥" + Number(v.amount).toLocaleString() : "—"}</span></li>`).join("")}
+        </ul>
+      ` : ""}
+
+      <button class="btn btn-ghost" id="entryQrBtn" style="width:100%;">📱 入店QRを表示</button>
+
+      <div class="action-row">
+        <button class="btn btn-ghost" id="editBtn">編集する</button>
+        <button class="btn btn-danger" id="deleteBtn">削除する</button>
+      </div>
+    `;
+    openSheet(html);
+
+    document.getElementById("closeDetail").addEventListener("click", closeSheet);
+    document.getElementById("entryQrBtn").addEventListener("click", () => openMemberEntryQRSheet(m));
+    const $idDocExpandBtn = document.getElementById("idDocExpandBtn");
+    if ($idDocExpandBtn) $idDocExpandBtn.addEventListener("click", () => openIdDocViewSheet(m.idDocument));
+    const $idDocThumb = document.getElementById("idDocThumb");
+    if ($idDocThumb) $idDocThumb.addEventListener("click", () => openIdDocViewSheet(m.idDocument));
+
+    document.getElementById("visitForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const amount = fd.get("amount") ? Number(fd.get("amount")) : 0;
+      await recordVisit(m, amount);
+      closeSheet();
+      showToast(`来店を記録しました(+1スタンプ)`);
+    });
+
+    const redeemBtn = document.getElementById("redeemBtn");
+    if (redeemBtn) {
+      redeemBtn.addEventListener("click", async () => {
+        await redeemReward(m);
+        closeSheet();
+        showToast("特典利用として記録しました");
+      });
+    }
+
+    document.getElementById("editBtn").addEventListener("click", () => openEditSheet(m));
+    document.getElementById("deleteBtn").addEventListener("click", () => confirmDelete(m));
+  }
+
+  // ---------- 本人確認書類(免許証・学生証・保険証など)の画像を圧縮して保存用に変換 ----------
+  const ID_DOC_TYPE_LABELS = { license: "運転免許証", student: "学生証", insurance: "保険証", other: "その他の書類" };
+  function idDocTypeLabel(type) { return ID_DOC_TYPE_LABELS[type] || "本人確認書類"; }
+  function compressImageFile(file, maxDim, quality, callback) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        let dataUrl = null;
+        try { dataUrl = canvas.toDataURL("image/jpeg", quality); } catch (err) { dataUrl = null; }
+        callback(dataUrl);
+      };
+      img.onerror = () => callback(null);
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => callback(null);
+    reader.readAsDataURL(file);
+  }
+
+  // ---------- 会員証QRの画像を読み取って会員を特定する(店員アプリのカメラで撮影) ----------
+  function decodeMemberQrFile(file, callback) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1200;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        let code = null;
+        try {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height) : null;
+        } catch (err) {
+          code = null;
+        }
+        if (!code || !code.data) { callback(null); return; }
+        const m = /#m([a-zA-Z0-9_-]+)/.exec(code.data) || /^m([a-zA-Z0-9_-]+)$/.exec(code.data);
+        const id = m ? m[1] : null;
+        const member = id ? state.members.find((x) => x.id === id) : null;
+        callback(member || null);
+      };
+      img.onerror = () => callback(null);
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => callback(null);
+    reader.readAsDataURL(file);
+  }
+
+  // ---------- 本人確認書類を拡大表示 ----------
+  function openIdDocViewSheet(doc) {
+    if (!doc || !doc.image) return;
+    const html = `
+      <div class="sheet-header">
+        <h2>${escapeHtml(idDocTypeLabel(doc.type))}</h2>
+        <button class="sheet-close" id="closeIdDocView" aria-label="閉じる">×</button>
+      </div>
+      <img src="${doc.image}" alt="本人確認書類" style="width:100%;border-radius:12px;border:1px solid var(--line);">
+      <p class="hint">${doc.uploadedAt ? "登録日: " + escapeHtml(new Date(doc.uploadedAt).toLocaleDateString("ja-JP")) : ""}</p>
+    `;
+    openSheet(html);
+    document.getElementById("closeIdDocView").addEventListener("click", closeSheet);
+  }
+
+  // ---------- 会員の入店QR(スキャンで会計対象に自動セット) ----------
+  function memberEntryUrl(m) {
+    return location.origin + location.pathname + location.search + "#m" + m.id;
+  }
+  function openMemberEntryQRSheet(m) {
+    const html = `
+      <div class="sheet-header">
+        <h2>${escapeHtml(m.name || "名前未設定")}さんの入店QR</h2>
+        <button class="sheet-close" id="closeEntryQr" aria-label="閉じる">×</button>
+      </div>
+      <div class="qr-card-wrap">
+        <div id="entryQrCanvas" class="qr-card-canvas"></div>
+      </div>
+      <p class="hint">来店時にスタッフの端末(会計画面)のカメラでこのQRを読み取ると、会計対象に${escapeHtml(m.name || "この会員")}さんが自動でセットされます。会員証やスマホに保存してお使いください。</p>
+    `;
+    openSheet(html);
+    document.getElementById("closeEntryQr").addEventListener("click", closeSheet);
+    const holder = document.getElementById("entryQrCanvas");
+    if (holder && window.QRCode) {
+      try {
+        new QRCode(holder, {
+          text: memberEntryUrl(m),
+          width: 220,
+          height: 220,
+          correctLevel: QRCode.CorrectLevel.H,
+        });
+      } catch (err) {
+        holder.innerHTML = `<p class="hint">QRコードの生成に失敗しました。</p>`;
+      }
+    } else if (holder) {
+      holder.innerHTML = `<p class="hint">QRコードを読み込めませんでした。通信環境をご確認のうえ、もう一度お試しください。</p>`;
+    }
+  }
+
+  async function recordVisit(m, amount, note) {
+    const wasFirstVisit = (m.visitCount || 0) === 0;
+    const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    const entry = { date: dateStr, amount: amount || 0 };
+    if (note) entry.note = note;
+    const visits = (m.visits || []).concat([entry]).slice(-15);
+    await state.db.collection("members").doc(m.id).update({
+      visitCount: (m.visitCount || 0) + 1,
+      totalSpend: (m.totalSpend || 0) + (amount || 0),
+      points: (m.points || 0) + 1,
+      totalPointsEarned: lifetimePointsOf(m) + 1,
+      visits,
+    });
+
+    // member.visits は直近15件しか保存しないため、来店頻度が高い会員ほど
+    // 古い記録が売上・分析の集計から漏れてしまう。そこで会計のたびに全件を
+    // 別コレクション(visitLog)にも記録し、年別・曜日別などの集計はそちらを使う。
+    try {
+      await state.db.collection("visitLog").add({
+        memberId: m.id,
+        memberName: m.name || "名前未設定",
+        date: dateStr,
+        amount: amount || 0,
+        note: note || "",
+        createdAt: new Date().toISOString(),
+      });
+    } catch (err) { /* 集計用の記録なので失敗しても会計自体は継続する */ }
+
+    // 不正防止: ボーナスは「紹介された本人の初来店」が確定した時点でのみ付与する
+    // (登録しただけで友達を増やしても紹介者側にはボーナスが入らない)
+    if (wasFirstVisit && m.referredBy && !m.referralBonusGranted) {
+      await grantReferralBonus(m);
+    }
+  }
+
+  async function grantReferralBonus(referredMember) {
+    const referrerId = referredMember.referredBy && referredMember.referredBy.id;
+    const referrer = referrerId ? state.members.find((x) => x.id === referrerId) : null;
+
+    if (!referrer) {
+      // 紹介者のデータが見つからない(削除済みなど)場合は処理済みにするだけ
+      await state.db.collection("members").doc(referredMember.id).update({ referralBonusGranted: true });
+      return;
+    }
+
+    // 不正防止: 同じ紹介者が30日間に受け取れるボーナスには上限を設ける
+    const now = Date.now();
+    const recentLog = (referrer.referralLog || []).filter((e) => now - new Date(e.date).getTime() < REFERRAL_WINDOW_MS);
+    const underCap = recentLog.length < REFERRAL_MONTHLY_CAP;
+
+    if (underCap) {
+      const newLog = recentLog.concat([{ date: new Date().toISOString(), memberId: referredMember.id, name: referredMember.name || "" }]).slice(-20);
+      await state.db.collection("members").doc(referrer.id).update({
+        points: (referrer.points || 0) + REFERRAL_BONUS_POINTS,
+        totalPointsEarned: lifetimePointsOf(referrer) + REFERRAL_BONUS_POINTS,
+        referralLog: newLog,
+      });
+      setTimeout(() => showToast(`紹介ボーナス: ${referrer.name || ""}さんに+${REFERRAL_BONUS_POINTS}スタンプ`), 1800);
+    } else {
+      setTimeout(() => showToast(`${referrer.name || ""}さんは紹介ボーナスの上限(30日に${REFERRAL_MONTHLY_CAP}回)に達しています`), 1800);
+    }
+
+    await state.db.collection("members").doc(referredMember.id).update({ referralBonusGranted: true });
+  }
+
+  async function redeemReward(m) {
+    const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    const visits = (m.visits || []).concat([{ date: dateStr, amount: 0, note: "特典利用" }]).slice(-15);
+    await state.db.collection("members").doc(m.id).update({ points: 0, visits });
+  }
+
+  function openEditSheet(m) {
+    const existingDoc = m.idDocument || null;
+    const html = `
+      <div class="sheet-header">
+        <h2>会員情報を編集</h2>
+        <button class="sheet-close" id="closeEdit" aria-label="閉じる">×</button>
+      </div>
+      <form class="stack" id="editForm">
+        <label class="field">お名前 *
+          <input type="text" id="e-name" name="name" value="${escapeHtml(m.name || "")}" required>
+        </label>
+        <label class="field">電話番号
+          <input type="tel" id="e-phone" name="phone" value="${escapeHtml(m.phone || "")}">
+        </label>
+        <label class="field">住所
+          <input type="text" id="e-address" name="address" value="${escapeHtml(m.address || "")}">
+        </label>
+        <div class="three-col">
+          <label class="field">誕生年(西暦)
+            <input type="number" id="e-byear" name="birthYear" min="1900" max="2100" value="${m.birthYear || ""}">
+          </label>
+          <label class="field">誕生月
+            <input type="number" id="e-bmonth" name="birthMonth" min="1" max="12" value="${m.birthMonth || ""}">
+          </label>
+          <label class="field">誕生日
+            <input type="number" id="e-bday" name="birthDay" min="1" max="31" value="${m.birthDay || ""}">
+          </label>
+        </div>
+        <label class="field">メモ
+          <textarea id="e-memo" name="memo" rows="2">${escapeHtml(m.memo || "")}</textarea>
+        </label>
+
+        <label class="field">本人確認書類(任意・年齢確認用)
+          <select id="e-id-type">
+            <option value="">書類の種類を選択</option>
+            <option value="license" ${existingDoc && existingDoc.type === "license" ? "selected" : ""}>運転免許証</option>
+            <option value="student" ${existingDoc && existingDoc.type === "student" ? "selected" : ""}>学生証</option>
+            <option value="insurance" ${existingDoc && existingDoc.type === "insurance" ? "selected" : ""}>保険証</option>
+            <option value="other" ${existingDoc && existingDoc.type === "other" ? "selected" : ""}>その他</option>
+          </select>
+        </label>
+        <div id="e-id-preview-wrap" ${existingDoc && existingDoc.image ? "" : "hidden"}>
+          <img id="e-id-preview" src="${existingDoc && existingDoc.image ? existingDoc.image : ""}" alt="本人確認書類プレビュー" style="max-width:160px;border-radius:10px;border:1px solid var(--line);display:block;margin-bottom:8px;">
+        </div>
+        <input type="file" accept="image/*" capture="environment" id="e-id-file" style="display:none">
+        <div class="reg-custom-row">
+          <button type="button" class="btn btn-ghost" id="e-id-capture" style="flex:1;">📷 ${existingDoc && existingDoc.image ? "撮り直す" : "書類を撮影する"}</button>
+          <button type="button" class="btn btn-ghost" id="e-id-clear" ${existingDoc && existingDoc.image ? "" : "hidden"} style="flex:none;">削除</button>
+        </div>
+        <p class="hint">免許証・学生証・保険証などを撮影して、年齢・氏名確認用に保存できます(任意)。画像はこのアプリ内にのみ保存されます。</p>
+
+        <button type="submit" class="btn btn-primary">保存する</button>
+      </form>
+    `;
+    openSheet(html);
+    document.getElementById("closeEdit").addEventListener("click", closeSheet);
+
+    // ---- 本人確認書類の撮影(編集) ----
+    let idDocState = "unchanged"; // "unchanged" | "cleared" | { image }
+    const $idType = document.getElementById("e-id-type");
+    const $idFile = document.getElementById("e-id-file");
+    const $idCapture = document.getElementById("e-id-capture");
+    const $idClear = document.getElementById("e-id-clear");
+    const $idPreviewWrap = document.getElementById("e-id-preview-wrap");
+    const $idPreview = document.getElementById("e-id-preview");
+    $idCapture.addEventListener("click", () => $idFile.click());
+    $idFile.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      compressImageFile(file, 1000, 0.7, (dataUrl) => {
+        $idFile.value = "";
+        if (!dataUrl) { showToast("画像を読み込めませんでした"); return; }
+        idDocState = { image: dataUrl };
+        $idPreview.src = dataUrl;
+        $idPreviewWrap.hidden = false;
+        $idClear.hidden = false;
+        $idCapture.textContent = "📷 撮り直す";
+      });
+    });
+    $idClear.addEventListener("click", () => {
+      idDocState = "cleared";
+      $idPreview.src = "";
+      $idPreviewWrap.hidden = true;
+      $idClear.hidden = true;
+      $idCapture.textContent = "📷 書類を撮影する";
+    });
+
+    document.getElementById("editForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const name = (fd.get("name") || "").toString().trim();
+      if (!name) return;
+      const payload = {
+        name,
+        phone: (fd.get("phone") || "").toString().trim(),
+        address: (fd.get("address") || "").toString().trim(),
+        birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
+        birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,
+        birthDay: fd.get("birthDay") ? Number(fd.get("birthDay")) : null,
+        memo: (fd.get("memo") || "").toString().trim(),
+      };
+      if (idDocState === "cleared") {
+        payload.idDocument = null;
+      } else if (idDocState !== "unchanged") {
+        payload.idDocument = { type: $idType.value || "other", image: idDocState.image, uploadedAt: new Date().toISOString() };
+      } else if (existingDoc && $idType.value !== (existingDoc.type || "")) {
+        payload.idDocument = { ...existingDoc, type: $idType.value || "other" };
+      }
+      await state.db.collection("members").doc(m.id).update(payload);
+      closeSheet();
+      showToast("会員情報を更新しました");
+    });
+  }
+
+  function confirmDelete(m) {
+    const html = `
+      <div class="sheet-header"><h2>削除しますか？</h2></div>
+      <p class="hint">「${escapeHtml(m.name || "")}」さんの会員データを削除します。この操作は取り消せません。</p>
+      <div class="action-row">
+        <button class="btn btn-ghost" id="cancelDelete">キャンセル</button>
+        <button class="btn btn-danger" id="confirmDelete">削除する</button>
+      </div>
+    `;
+    openSheet(html);
+    document.getElementById("cancelDelete").addEventListener("click", closeSheet);
+    document.getElementById("confirmDelete").addEventListener("click", async () => {
+      await state.db.collection("members").doc(m.id).delete();
+      closeSheet();
+      showToast("削除しました");
+    });
+  }
+
+  // ---------- visitLog バックフィル(既存会員の既存記録を一度だけ移す) ----------
+  // この修正より前から使っている会員は、member.visits(直近15件)にしか記録が無い。
+  // visitLog(集計用の全件保存)が導入された後、各会員につき一度だけ
+  // その時点の member.visits を visitLog にコピーし、以後は recordVisit() が
+  // 両方に書き込む。member.visitLogBackfilled フラグで二重実行を防ぐ。
+  let backfillRunning = false;
+  async function backfillVisitLogIfNeeded() {
+    if (!state.db || !state.ready || !state.visitLogReady || backfillRunning) return;
+    const targets = state.members.filter((m) => !m.visitLogBackfilled && (m.visits || []).length);
+    if (!targets.length) return;
+    backfillRunning = true;
+    try {
+      for (const m of targets) {
+        const writes = (m.visits || []).map((v) =>
+          state.db.collection("visitLog").add({
+            memberId: m.id,
+            memberName: m.name || "名前未設定",
+            date: v.date || "",
+            amount: Number(v.amount) || 0,
+            note: v.note || "",
+            createdAt: "",
+            backfilled: true,
+          })
+        );
+        await Promise.all(writes);
+        await state.db.collection("members").doc(m.id).update({ visitLogBackfilled: true });
+      }
+    } catch (err) {
+      // 集計用のバックフィルなので、失敗しても通常の会計・登録機能には影響しない
+    } finally {
+      backfillRunning = false;
+    }
+  }
+
+  // ---------- boot ----------
+  async function boot() {
+    state.unlocked = readStoredUnlock();
+    if (state.unlocked) state.tab = "list";
+    applyLockUI();
+    render();
+    let db = null;
+    try {
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+    } catch (err) {
+      db = null;
+    }
+    if (!db) {
+      $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>データ保存機能を利用できません。</p><p>通信環境をご確認のうえ、ページを再読み込みしてください。</p></div>`;
+      return;
+    }
+    state.db = db;
+    state.db.collection("members").orderBy("name", "asc").onSnapshot(
+      (snap) => {
+        state.members = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.ready = true;
+        render();
+        tryApplyMemberEntry();
+        backfillVisitLogIfNeeded();
+      },
+      () => { state.ready = true; showToast("データの読み込みでエラーが発生しました"); render(); }
+    );
+    state.db.collection("guestSales").onSnapshot(
+      (snap) => {
+        state.guestSales = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.guestSalesReady = true;
+        render();
+      },
+      () => { state.guestSalesReady = true; render(); }
+    );
+    // 会員の来店記録は member.visits に直近15件のみ保存しているため、
+    // 来店頻度が高い会員ほど古い記録が集計から漏れてしまう。
+    // そのため全件を別コレクションにも記録し、売上・分析タブの集計はここから行う。
+    state.db.collection("visitLog").onSnapshot(
+      (snap) => {
+        state.visitLog = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.visitLogReady = true;
+        render();
+        backfillVisitLogIfNeeded();
+      },
+      () => { state.visitLogReady = true; render(); }
+    );
+    state.db.collection("settings").doc("staffAccess").onSnapshot(
+      (doc) => {
+        const data = doc && doc.exists ? doc.data() : null;
+        if (data && data.code) {
+          state.staffCode = String(data.code);
+        } else if (!state.staffGateChecked) {
+          // まだコードが無ければ初回に自動で発行する
+          const code = String(Math.floor(1000 + Math.random() * 9000));
+          state.db.collection("settings").doc("staffAccess").set({ code, updatedAt: Date.now() }).catch(() => {});
+        }
+        state.staffGateChecked = true;
+        evaluateStaffAccess();
+      },
+      () => { state.staffGateChecked = true; evaluateStaffAccess(); }
+    );
+    state.db.collection("settings").doc("pricing").onSnapshot(
+      (doc) => {
+        const data = doc && doc.exists ? doc.data() : null;
+        CUSTOM_MENU_ITEMS = (data && Array.isArray(data.customMenu))
+          ? data.customMenu.map((it) => ({ key: it.key, label: it.label, price: Number(it.price) || 0 }))
+          : CUSTOM_MENU_ITEMS;
+        rebuildMenuAggregates();
+        COURSES.concat(GAME_ITEMS).concat(BASE_MENU_ITEMS).forEach((it) => {
+          it.price = data && data[it.key] != null ? Number(data[it.key]) : DEFAULT_PRICES[it.key];
+        });
+        EXTENSION_PRICE = data && data.extension != null ? Number(data.extension) : DEFAULT_PRICES.extension;
+        TANPIN_CHARGE = data && data.tanpin != null ? Number(data.tanpin) : DEFAULT_PRICES.tanpin;
+        render();
+      },
+      () => {}
+    );
+    // ---- オーナーPIN(settings/app ドキュメント。無ければ初期値 "6188" を自動発行) ----
+    state.db.collection("settings").doc("app").onSnapshot(
+      (doc) => {
+        const data = doc && doc.exists ? doc.data() : null;
+        if (data && data.ownerPin) {
+          OWNER_PIN = String(data.ownerPin);
+        } else {
+          state.db.collection("settings").doc("app").set({ ownerPin: OWNER_PIN, updatedAt: Date.now() }, { merge: true }).catch(() => {});
+        }
+      },
+      () => {}
+    );
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

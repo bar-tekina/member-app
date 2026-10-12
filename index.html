@@ -1007,6 +1007,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
         <div class="eyebrow">Darts &amp; Game Bar</div>
         <h1>Bar<span class="accent">てきな？</span> オーナー専用アプリ</h1>
       </div>
+      <button class="lock-btn" id="staffSelfRegBtn" aria-label="スタッフ登録" hidden>📝</button>
       <button class="lock-btn" id="pricingBtn" aria-label="料金設定" hidden>💴</button>
       <button class="lock-btn" id="staffCodeBtn" aria-label="スタッフコード管理" hidden>🔑</button>
       <button class="lock-btn" id="lockBtn" aria-label="オーナーロック">🔒</button>
@@ -1394,6 +1395,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
   const $lockBtn = document.getElementById("lockBtn");
   const $staffCodeBtn = document.getElementById("staffCodeBtn");
   const $pricingBtn = document.getElementById("pricingBtn");
+  const $staffSelfRegBtn = document.getElementById("staffSelfRegBtn");
   const $scoreboard = document.getElementById("scoreboard");
   const $tabsNav = document.querySelector("nav.tabs");
 
@@ -1402,6 +1404,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     $lockBtn.textContent = state.unlocked ? "🔓" : "🔒";
     $staffCodeBtn.hidden = !state.unlocked;
     $pricingBtn.hidden = !state.unlocked;
+    $staffSelfRegBtn.hidden = !state.staffGranted;
     document.querySelectorAll("nav.tabs button").forEach((btn) => {
       const restricted = RESTRICTED_TABS.includes(btn.dataset.tab);
       btn.hidden = restricted && !state.unlocked;
@@ -1547,14 +1550,16 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
   }
 
   // ---- スタッフ情報の追加・編集(氏名・連絡先・住所・本人確認書類) ----
-  function staffFormSheetHtml(existing) {
+  function staffFormSheetHtml(existing, opts) {
+    const selfMode = !!(opts && opts.selfMode);
     const s = existing || {};
     const existingDoc = s.idDocument || null;
     return `
       <div class="sheet-header">
-        <h2>${existing ? "スタッフ情報を編集" : "スタッフを追加"}</h2>
+        <h2>${selfMode ? "スタッフ登録" : (existing ? "スタッフ情報を編集" : "スタッフを追加")}</h2>
         <button class="sheet-close" id="closeStaffForm" aria-label="閉じる">×</button>
       </div>
+      ${selfMode ? `<p class="hint" style="margin:0 0 4px;">ご自身の情報を登録してください。登録すると、オーナーアプリの「スタッフ一覧」に自動で反映されます。</p>` : ""}
       <form class="stack" id="staffForm">
         <label class="field">お名前 *
           <input type="text" id="sf-name" name="name" value="${escapeHtml(s.name || "")}" required>
@@ -1586,17 +1591,20 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
         <p class="hint">免許証・学生証・保険証などを撮影して保存できます(任意)。画像はこのアプリ内にのみ保存されます。</p>
 
         <div class="action-row">
-          <button type="button" class="btn btn-ghost" id="staffFormCancel" style="flex:1;">${existing ? "一覧に戻る" : "キャンセル"}</button>
-          <button type="submit" class="btn btn-primary" style="flex:1;">保存する</button>
+          <button type="button" class="btn btn-ghost" id="staffFormCancel" style="flex:1;">${selfMode ? "キャンセル" : (existing ? "一覧に戻る" : "キャンセル")}</button>
+          <button type="submit" class="btn btn-primary" style="flex:1;">${selfMode ? "登録する" : "保存する"}</button>
         </div>
       </form>
     `;
   }
-  function openStaffFormSheet(existing) {
-    const html = staffFormSheetHtml(existing);
+  function openStaffFormSheet(existing, opts) {
+    const selfMode = !!(opts && opts.selfMode);
+    const html = staffFormSheetHtml(existing, opts);
     openSheet(html);
     document.getElementById("closeStaffForm").addEventListener("click", closeSheet);
-    document.getElementById("staffFormCancel").addEventListener("click", () => openStaffCodeSheet());
+    document.getElementById("staffFormCancel").addEventListener("click", () => {
+      if (selfMode) { closeSheet(); } else { openStaffCodeSheet(); }
+    });
 
     let idDocState = "unchanged";
     const existingDoc = (existing && existing.idDocument) || null;
@@ -1654,8 +1662,13 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           payload.createdAt = Date.now();
           await state.db.collection("staff").add(payload);
         }
-        showToast(existing ? "スタッフ情報を更新しました" : "スタッフを追加しました");
-        openStaffCodeSheet();
+        if (selfMode) {
+          showToast("登録しました。ありがとうございます！");
+          closeSheet();
+        } else {
+          showToast(existing ? "スタッフ情報を更新しました" : "スタッフを追加しました");
+          openStaffCodeSheet();
+        }
       } catch (err) {
         showToast("保存に失敗しました");
         submitBtn.disabled = false;
@@ -1871,6 +1884,8 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     });
   }
 
+  $staffSelfRegBtn.addEventListener("click", () => openStaffFormSheet(null, { selfMode: true }));
+
   $lockBtn.addEventListener("click", () => {
     if (state.unlocked) {
       state.unlocked = false;
@@ -1911,6 +1926,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       $lockBtn.hidden = true;
       $staffCodeBtn.hidden = true;
       $pricingBtn.hidden = true;
+      $staffSelfRegBtn.hidden = true;
       if (!state.ready) {
         $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
         return;
@@ -1927,6 +1943,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       $lockBtn.hidden = true;
       $staffCodeBtn.hidden = true;
       $pricingBtn.hidden = true;
+      $staffSelfRegBtn.hidden = true;
       $main.innerHTML = feedbackFormHtml();
       bindFeedbackForm($main);
       return;
@@ -1939,6 +1956,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       $lockBtn.hidden = true;
       $staffCodeBtn.hidden = true;
       $pricingBtn.hidden = true;
+      $staffSelfRegBtn.hidden = true;
       $main.innerHTML = reservationFormHtml();
       bindReservationForm($main);
       return;
@@ -1952,6 +1970,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       $tabsNav.hidden = true;
       $scoreboard.hidden = true;
       document.getElementById("fabAdd").hidden = true;
+      $staffSelfRegBtn.hidden = true;
       if (!state.staffGateChecked) {
         $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
       } else {
@@ -1961,6 +1980,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       return;
     }
     $tabsNav.hidden = false;
+    $staffSelfRegBtn.hidden = false;
 
     if (!state.ready) {
       $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;

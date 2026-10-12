@@ -4450,6 +4450,17 @@ Barてきな？ 一同`;
     if (state.unlocked) state.tab = "list";
     applyLockUI();
     render();
+
+    // ---- 来店確認ページ(#checkin)はFirestoreへの読み書きが一切不要 ----
+    // ここでFirebaseへ接続しないことで、来店者の端末に会員・スタッフ・
+    // 売上などのデータが一切読み込まれないようにする(不要な個人情報の
+    // ダウンロードを避けるため)。
+    if (state.publicCheckinMode) {
+      state.ready = true;
+      render();
+      return;
+    }
+
     let db = null;
     try {
       if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -4467,16 +4478,48 @@ Barてきな？ 一同`;
     // 保存ができない状態になるため、保存系の操作の直前にも毎回呼び直す。
     await ensureAnonymousAuth();
     state.db = db;
+
+    // ---- アンケート(#feedback)・予約(#reserve)は送信専用ページ ----
+    // 送信に必要な書き込み権限だけがあればよく、会員一覧などの読み込みは
+    // 不要なため、他のコレクションは一切購読しない。
+    if (state.publicFeedbackMode || state.publicReserveMode) {
+      state.ready = true;
+      render();
+      return;
+    }
+
+    // ---- 会員証ページ(#card<id>)は「自分の会員証」1件だけが必要 ----
+    // 会員全員のデータをまとめて読み込む(bulk)のではなく、該当する
+    // 1件だけをその場で取得する。これにより、他のお客様の個人情報
+    // (電話番号・本人確認書類の画像など)が端末に読み込まれることはない。
+    if (state.publicCardMode) {
+      if (state.publicCardMemberId) {
+        try {
+          const doc = await state.db.collection("members").doc(state.publicCardMemberId).get();
+          if (doc.exists) state.publicCardMemberFallback = { id: doc.id, ...doc.data() };
+        } catch (err) { /* 取得失敗時は下のreadyフラグのみ立てて「見つかりません」表示にする */ }
+      }
+      state.ready = true;
+      render();
+      return;
+    }
+
     state.db.collection("members").orderBy("name", "asc").onSnapshot(
       (snap) => {
         state.members = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         state.ready = true;
         render();
         tryApplyMemberEntry();
-        backfillVisitLogIfNeeded();
+        if (!state.publicJoinMode) backfillVisitLogIfNeeded();
       },
       () => { state.ready = true; showToast("データの読み込みでエラーが発生しました"); render(); }
     );
+
+    // ---- 新規会員登録ページ(#join)はここまでで必要な機能が揃っている ----
+    // (紹介者検索・簡易重複チェックのため会員一覧の読み込みは必要だが、
+    // 売上・予約・スタッフ名簿・各種PINなど、登録とは無関係な情報は
+    // 来店者の端末に一切読み込まない)
+    if (state.publicJoinMode) return;
     state.db.collection("guestSales").onSnapshot(
       (snap) => {
         state.guestSales = snap.docs.map((d) => ({ id: d.id, ...d.data() }));

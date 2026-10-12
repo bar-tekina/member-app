@@ -1119,12 +1119,46 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     { key: "gold", label: "GOLD", min: 15 },
     { key: "regular", label: "REGULAR", min: 0 },
   ];
+  // 失効ルール: 累計実績だけで判定すると「以前は頻繁に来ていたが、その後
+  // 全く来なくなった会員」もずっとVIP/GOLDのまま表示されてしまい、
+  // 「今まさにアクティブな優良顧客」を見分ける指標として機能しなくなる。
+  // そこで、直近の来店から一定期間(90日=3ヶ月)経過している場合は、
+  // 累計実績としてのランクを保ったまま、表示上のランクだけ1段階下げる。
+  // (累計ポイント自体は減らさないので、来店すればすぐ元のランクに戻る)
+  const TIER_DOWNGRADE_DAYS = 90;
+  function parseVisitDateStr(str) {
+    const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(str || "");
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+  function lastVisitTsOf(m) {
+    const visits = m.visits || [];
+    if (!visits.length) return null;
+    const last = visits[visits.length - 1];
+    if (last && last.ts) return last.ts;
+    return parseVisitDateStr(last && last.date);
+  }
   function lifetimePointsOf(m) {
     return (m.totalPointsEarned != null ? m.totalPointsEarned : m.points) || 0;
   }
+  function pureTierIdxOf(total) {
+    const idx = TIERS.findIndex((t) => total >= t.min);
+    return idx === -1 ? TIERS.length - 1 : idx;
+  }
   function tierOf(m) {
     const total = lifetimePointsOf(m);
-    return TIERS.find((t) => total >= t.min) || TIERS[TIERS.length - 1];
+    let idx = pureTierIdxOf(total);
+    if (idx < TIERS.length - 1) {
+      const lastTs = lastVisitTsOf(m);
+      if (lastTs != null) {
+        const daysSince = (Date.now() - lastTs) / (1000 * 60 * 60 * 24);
+        if (daysSince >= TIER_DOWNGRADE_DAYS) {
+          idx = Math.min(idx + 1, TIERS.length - 1);
+        }
+      }
+    }
+    return TIERS[idx];
   }
   function tierBadgeHtml(m) {
     const t = tierOf(m);
@@ -1136,8 +1170,13 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   }
   function tierNextInfo(m) {
     const total = lifetimePointsOf(m);
+    const pureIdx = pureTierIdxOf(total);
     const tier = tierOf(m);
     const idx = TIERS.findIndex((t) => t.key === tier.key);
+    if (idx > pureIdx) {
+      // 失効により実績より低いランクで表示されている状態
+      return `来店が途絶えたため一時的にランクダウン中です(来店すれば${TIERS[pureIdx].label}に戻ります)`;
+    }
     const next = idx > 0 ? TIERS[idx - 1] : null;
     if (!next) return "最上位ランクです";
     return `${next.label}まであと${next.min - total}pt`;
@@ -2800,7 +2839,10 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   async function recordVisit(m, amount, note) {
     const wasFirstVisit = (m.visitCount || 0) === 0;
     const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
-    const entry = { date: dateStr, amount: amount || 0 };
+    // ts: ランクの失効判定(直近の来店からの経過日数)を日付文字列の解析に
+    // 依存せず正確に行うための実時刻。古い記録にはtsが無いため、その場合は
+    // date文字列(yyyy/mm/dd)から解析する(lastVisitTsOf参照)。
+    const entry = { date: dateStr, amount: amount || 0, ts: Date.now() };
     if (note) entry.note = note;
     const visits = (m.visits || []).concat([entry]).slice(-15);
     const inc = firebase.firestore.FieldValue.increment;
@@ -2876,7 +2918,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
 
   async function redeemReward(m) {
     const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
-    const visits = (m.visits || []).concat([{ date: dateStr, amount: 0, note: "特典利用" }]).slice(-15);
+    const visits = (m.visits || []).concat([{ date: dateStr, amount: 0, note: "特典利用", ts: Date.now() }]).slice(-15);
     // 特典利用後の残ポイントは「0固定」ではなく、現在のスタンプ数から
     // REWARD_THRESHOLD分だけ引く(例: 12個溜まっていたら7個残す)。
     // 0固定だと、特典ボタンを押すタイミングによって次回までに貯めたスタンプが

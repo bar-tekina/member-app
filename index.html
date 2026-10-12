@@ -1275,6 +1275,10 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     if (hash && hash === state.staffCode) {
       writeStoredStaffCode(state.staffCode);
       state.staffGranted = true;
+      // スタッフコードのQRから開いた直後は #<コード> がURLに残ってしまい、
+      // ブラウザの「戻る」操作やURLの再確認でコードが他人の目に触れる恐れがある。
+      // tryApplyMemberEntry() が #m<id> を消しているのと同様に、ここでも消す。
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (err) {}
     } else {
       state.staffGranted = readStoredStaffCode() === state.staffCode;
     }
@@ -1908,6 +1912,23 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
       submitBtn.disabled = true;
       submitBtn.textContent = "登録中…";
       try {
+        // ---- 不正防止(再チェック): 上の重複チェックは手元の端末に同期済みの
+        // データだけを見ているため、ほぼ同時刻に別の端末(他のお客様のスマホなど)
+        // から同じ電話番号で登録されていると見逃すことがある。保存の直前に
+        // Firestore 側の最新データでもう一度確認する。
+        if (phone) {
+          const normPhone = normalizePhone(phone);
+          const dupSnap = await state.db.collection("members").where("phone", "==", phone).limit(1).get();
+          const dupSnap2 = normPhone !== phone
+            ? await state.db.collection("members").where("phone", "==", normPhone).limit(1).get()
+            : null;
+          if (!dupSnap.empty || (dupSnap2 && !dupSnap2.empty)) {
+            showToast("この電話番号はすでに登録されています(重複登録はできません)");
+            submitBtn.disabled = false;
+            submitBtn.textContent = "この内容で登録する";
+            return;
+          }
+        }
         const newMemberData = {
           name,
           phone,
@@ -2782,11 +2803,17 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     const entry = { date: dateStr, amount: amount || 0 };
     if (note) entry.note = note;
     const visits = (m.visits || []).concat([entry]).slice(-15);
+    const inc = firebase.firestore.FieldValue.increment;
+    // visitCount・totalSpend・points は他の端末と同時に更新される可能性があるため、
+    // その場の値を読んで+1するのではなく、Firestore 側でアトミックに加算する
+    // (increment)。これにより同時会計による記録の欠落を防ぐ。
     await state.db.collection("members").doc(m.id).update({
-      visitCount: (m.visitCount || 0) + 1,
-      totalSpend: (m.totalSpend || 0) + (amount || 0),
-      points: (m.points || 0) + 1,
-      totalPointsEarned: lifetimePointsOf(m) + 1,
+      visitCount: inc(1),
+      totalSpend: inc(amount || 0),
+      points: inc(1),
+      // totalPointsEarned が未設定の古い会員データは、まずこれまでの points を
+      // 引き継いで初期化する(以後はこのフィールドができるので increment で加算される)
+      totalPointsEarned: m.totalPointsEarned != null ? inc(1) : lifetimePointsOf(m) + 1,
       visits,
     });
 
@@ -2805,9 +2832,13 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     } catch (err) { /* 集計用の記録なので失敗しても会計自体は継続する */ }
 
     // 不正防止: ボーナスは「紹介された本人の初来店」が確定した時点でのみ付与する
-    // (登録しただけで友達を増やしても紹介者側にはボーナスが入らない)
+    // (登録しただけで友達を増やしても紹介者側にはボーナスが入らない)。
+    // ここは会計そのものとは別の処理なので、失敗しても会計の成功報告を
+    // 妨げないよう、独立した try/catch で囲む。
     if (wasFirstVisit && m.referredBy && !m.referralBonusGranted) {
-      await grantReferralBonus(m);
+      try {
+        await grantReferralBonus(m);
+      } catch (err) { /* 紹介ボーナスの付与に失敗しても、会計自体は既に成功している */ }
     }
   }
 
@@ -2829,8 +2860,10 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     if (underCap) {
       const newLog = recentLog.concat([{ date: new Date().toISOString(), memberId: referredMember.id, name: referredMember.name || "" }]).slice(-20);
       await state.db.collection("members").doc(referrer.id).update({
-        points: (referrer.points || 0) + REFERRAL_BONUS_POINTS,
-        totalPointsEarned: lifetimePointsOf(referrer) + REFERRAL_BONUS_POINTS,
+        points: firebase.firestore.FieldValue.increment(REFERRAL_BONUS_POINTS),
+        totalPointsEarned: referrer.totalPointsEarned != null
+          ? firebase.firestore.FieldValue.increment(REFERRAL_BONUS_POINTS)
+          : lifetimePointsOf(referrer) + REFERRAL_BONUS_POINTS,
         referralLog: newLog,
       });
       setTimeout(() => showToast(`紹介ボーナス: ${referrer.name || ""}さんに+${REFERRAL_BONUS_POINTS}スタンプ`), 1800);
@@ -2844,7 +2877,12 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   async function redeemReward(m) {
     const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
     const visits = (m.visits || []).concat([{ date: dateStr, amount: 0, note: "特典利用" }]).slice(-15);
-    await state.db.collection("members").doc(m.id).update({ points: 0, visits });
+    // 特典利用後の残ポイントは「0固定」ではなく、現在のスタンプ数から
+    // REWARD_THRESHOLD分だけ引く(例: 12個溜まっていたら7個残す)。
+    // 0固定だと、特典ボタンを押すタイミングによって次回までに貯めたスタンプが
+    // 消えてしまうことがあった。
+    const remaining = Math.max(0, (m.points || 0) - REWARD_THRESHOLD);
+    await state.db.collection("members").doc(m.id).update({ points: remaining, visits });
   }
 
   function openEditSheet(m) {
@@ -2939,9 +2977,18 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
       const fd = new FormData(e.target);
       const name = (fd.get("name") || "").toString().trim();
       if (!name) return;
+      const phone = (fd.get("phone") || "").toString().trim();
+      // ---- 不正防止: 編集時も電話番号の重複チェックを行う ----
+      // (新規登録時のみチェックしていたため、編集で別の会員と同じ電話番号に
+      // 変更できてしまっていた)
+      const dup = findMemberByPhone(phone, m.id);
+      if (dup) {
+        showToast("この電話番号は他の会員で既に登録されています");
+        return;
+      }
       const payload = {
         name,
-        phone: (fd.get("phone") || "").toString().trim(),
+        phone,
         address: (fd.get("address") || "").toString().trim(),
         birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
         birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,
@@ -3093,11 +3140,18 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
           ? data.customMenu.map((it) => ({ key: it.key, label: it.label, price: Number(it.price) || 0 }))
           : CUSTOM_MENU_ITEMS;
         rebuildMenuAggregates();
+        // Number(data[it.key]) が NaN になる値(空文字や不正な文字列など)が
+        // Firestore に保存されていた場合、!= null チェックだけでは素通りして
+        // 料金が NaN になり、以降の合計金額計算が全て NaN になってしまう。
+        // Number.isFinite() で確実な数値だけを使い、それ以外は初期値に戻す。
         COURSES.concat(GAME_ITEMS).concat(BASE_MENU_ITEMS).forEach((it) => {
-          it.price = data && data[it.key] != null ? Number(data[it.key]) : DEFAULT_PRICES[it.key];
+          const n = data ? Number(data[it.key]) : NaN;
+          it.price = Number.isFinite(n) ? n : DEFAULT_PRICES[it.key];
         });
-        EXTENSION_PRICE = data && data.extension != null ? Number(data.extension) : DEFAULT_PRICES.extension;
-        TANPIN_CHARGE = data && data.tanpin != null ? Number(data.tanpin) : DEFAULT_PRICES.tanpin;
+        const extN = data ? Number(data.extension) : NaN;
+        EXTENSION_PRICE = Number.isFinite(extN) ? extN : DEFAULT_PRICES.extension;
+        const tanN = data ? Number(data.tanpin) : NaN;
+        TANPIN_CHARGE = Number.isFinite(tanN) ? tanN : DEFAULT_PRICES.tanpin;
         render();
       },
       () => {}

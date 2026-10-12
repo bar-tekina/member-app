@@ -4080,29 +4080,37 @@ Barてきな？ 一同`;
         <div class="pc-avatar" style="margin:0 auto 10px;">${escapeHtml(initials(m.name))}</div>
         <h2 class="checkin-title">${escapeHtml(m.name || "名前未設定")}さんの会員証</h2>
         <p class="checkin-sub">${escapeHtml(tierOf(m).label)}・スタンプ ${m.points || 0}pt</p>
-        <div class="qr-card-wrap" style="margin-top:14px;">
+        <button type="button" class="btn btn-primary" id="showMemberQrBtn" style="width:100%;margin-top:16px;">📱 QRを表示する</button>
+        <div class="qr-card-wrap" id="memberCardQrWrap" style="margin-top:14px;" hidden>
           <div id="memberCardQrCanvas" class="qr-card-canvas"></div>
         </div>
-        <p class="hint" style="margin-top:14px;">来店時にスタッフの端末でこのQRを読み取ってもらうと、お会計がスムーズです。このページをホーム画面に追加しておくと、いつでもすぐに開けます。</p>
+        <p class="hint" style="margin-top:14px;">お会計の際にスタッフにこのQRを見せると、読み取ってもらえます。このページをホーム画面に追加しておくと、いつでもすぐに開けます。</p>
       </div>
     `;
   }
   function bindMemberCardPage(m) {
-    const holder = document.getElementById("memberCardQrCanvas");
-    if (holder && window.QRCode) {
-      try {
-        new QRCode(holder, {
-          text: memberEntryUrl(m),
-          width: 220,
-          height: 220,
-          correctLevel: QRCode.CorrectLevel.H,
-        });
-      } catch (err) {
-        holder.innerHTML = `<p class="hint">QRコードの生成に失敗しました。</p>`;
+    const $btn = document.getElementById("showMemberQrBtn");
+    const $wrap = document.getElementById("memberCardQrWrap");
+    if (!$btn || !$wrap) return;
+    $btn.addEventListener("click", () => {
+      $wrap.hidden = false;
+      $btn.hidden = true;
+      const holder = document.getElementById("memberCardQrCanvas");
+      if (holder && window.QRCode) {
+        try {
+          new QRCode(holder, {
+            text: memberEntryUrl(m),
+            width: 220,
+            height: 220,
+            correctLevel: QRCode.CorrectLevel.H,
+          });
+        } catch (err) {
+          holder.innerHTML = `<p class="hint">QRコードの生成に失敗しました。</p>`;
+        }
+      } else if (holder) {
+        holder.innerHTML = `<p class="hint">QRコードを読み込めませんでした。通信環境をご確認のうえ、もう一度お試しください。</p>`;
       }
-    } else if (holder) {
-      holder.innerHTML = `<p class="hint">QRコードを読み込めませんでした。通信環境をご確認のうえ、もう一度お試しください。</p>`;
-    }
+    });
   }
 
   async function recordVisit(m, amount, note) {

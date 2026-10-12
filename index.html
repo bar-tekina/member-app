@@ -1142,6 +1142,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     pendingEntryMemberId: null, publicJoinMode: false, publicJoinDone: false,
     publicFeedbackMode: false,
     publicCheckinMode: false,
+    publicCardMode: false, publicCardMemberId: null, publicCardMemberFallback: null,
     publicReserveMode: false, reserveFormMonth: null, reserveFormDate: null,
     guestSales: [], guestSalesReady: false,
     visitLog: [], visitLogReady: false,
@@ -1229,6 +1230,10 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     if (hash === "feedback") { state.publicFeedbackMode = true; return; }
     if (hash === "checkin") { state.publicCheckinMode = true; return; }
     if (hash === "reserve") { state.publicReserveMode = true; return; }
+    // #card<会員ID> は、お客様ご自身のスマホでいつでも自分の会員証(QR)を
+    // 見返せるようにするための公開ページ(PIN・スタッフコード不要)。
+    const c = /^card([a-zA-Z0-9_-]{4,})$/.exec(hash);
+    if (c) { state.publicCardMode = true; state.publicCardMemberId = c[1]; return; }
     const m = /^m([a-zA-Z0-9_-]{4,})$/.exec(hash);
     if (m) state.pendingEntryMemberId = m[1];
   })();
@@ -2086,6 +2091,28 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       return;
     }
 
+    if (state.publicCardMode) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      $lockBtn.hidden = true;
+      $staffCodeBtn.hidden = true;
+      $pricingBtn.hidden = true;
+      $staffSelfRegBtn.hidden = true;
+      if (!state.ready) {
+        $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+        return;
+      }
+      const cm = state.members.find((x) => x.id === state.publicCardMemberId) || state.publicCardMemberFallback;
+      if (!cm) {
+        $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>会員証が見つかりませんでした。リンクをご確認ください。</p></div>`;
+        return;
+      }
+      $main.innerHTML = memberCardPageHtml(cm);
+      bindMemberCardPage(cm);
+      return;
+    }
+
     if (state.publicReserveMode) {
       $tabsNav.hidden = true;
       $scoreboard.hidden = true;
@@ -2501,14 +2528,20 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         };
         const ref = await withAuthRetry(() => state.db.collection("members").add(newMemberData));
         showToast(referredBy ? `「${name}」さんを登録しました(紹介特典+${REFERRAL_WELCOME_POINTS})` : `「${name}」さんを登録しました`);
-        if (!state.publicJoinMode) {
-          document.querySelector('nav.tabs button[data-tab="list"]').click();
-        }
-        // 登録直後に、この会員専用の入店QRをその場で発行して見せる
-        openMemberEntryQRSheet({ id: ref.id, ...newMemberData });
         if (state.publicJoinMode) {
-          // 次のお客様のために、登録フォームを空の状態に戻しておく
+          // お客様ご自身のスマホでの登録(#join)の場合は、いつでも開き直せる
+          // 「会員証」専用ページ(#card<id>)にそのまま移動する。URLを
+          // ブックマークやホーム画面に追加しておけば、次回以降もすぐ開ける。
+          state.publicJoinMode = false;
+          state.publicCardMode = true;
+          state.publicCardMemberId = ref.id;
+          state.publicCardMemberFallback = { id: ref.id, ...newMemberData };
+          try { history.replaceState(null, "", location.pathname + location.search + "#card" + ref.id); } catch (err) {}
           render();
+        } else {
+          document.querySelector('nav.tabs button[data-tab="list"]').click();
+          // 登録直後に、この会員専用の入店QRをその場で発行して見せる(スタッフ操作時)
+          openMemberEntryQRSheet({ id: ref.id, ...newMemberData });
         }
       } catch (err) {
         showToast("登録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
@@ -3983,7 +4016,13 @@ Barてきな？ 一同`;
   function memberEntryUrl(m) {
     return location.origin + location.pathname + location.search + "#m" + m.id;
   }
+  // お客様ご自身のスマホで、いつでもこの会員証(QR)を開き直せる公開リンク。
+  // #m<id>(スタッフがスキャンする用)とは別に用意している(用途が違うため)。
+  function memberCardUrl(m) {
+    return location.origin + location.pathname + location.search + "#card" + m.id;
+  }
   function openMemberEntryQRSheet(m) {
+    const cardUrl = memberCardUrl(m);
     const html = `
       <div class="sheet-header">
         <h2>${escapeHtml(m.name || "名前未設定")}さんの会員証</h2>
@@ -3993,10 +4032,63 @@ Barてきな？ 一同`;
         <div id="entryQrCanvas" class="qr-card-canvas"></div>
       </div>
       <p class="hint">来店時にスタッフの端末(会計画面)のカメラでこのQRを読み取ると、会計対象に${escapeHtml(m.name || "この会員")}さんが自動でセットされます。会員証やスマホに保存してお使いください。</p>
+      <div class="section-title" style="margin-top:18px;">お客様ご自身のスマホで見られるリンク</div>
+      <p class="hint">下のリンクをお客様に送ると、ご自身のスマホでいつでもこの会員証を開き直せます(ホーム画面に追加しておくと便利です)。</p>
+      <div class="reg-custom-row">
+        <input type="text" id="memberCardUrlInput" value="${escapeHtml(cardUrl)}" readonly style="flex:1;">
+        <button type="button" class="btn btn-ghost" id="copyCardUrlBtn">コピー</button>
+      </div>
     `;
     openSheet(html);
     document.getElementById("closeEntryQr").addEventListener("click", closeSheet);
+    const $copyBtn = document.getElementById("copyCardUrlBtn");
+    if ($copyBtn) {
+      $copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(cardUrl);
+          showToast("リンクをコピーしました");
+        } catch (err) {
+          const $input = document.getElementById("memberCardUrlInput");
+          if ($input) { $input.focus(); $input.select(); $input.setSelectionRange(0, 99999); }
+          showToast("リンクを選択しました。長押しでコピーしてください");
+        }
+      });
+    }
     const holder = document.getElementById("entryQrCanvas");
+    if (holder && window.QRCode) {
+      try {
+        new QRCode(holder, {
+          text: memberEntryUrl(m),
+          width: 220,
+          height: 220,
+          correctLevel: QRCode.CorrectLevel.H,
+        });
+      } catch (err) {
+        holder.innerHTML = `<p class="hint">QRコードの生成に失敗しました。</p>`;
+      }
+    } else if (holder) {
+      holder.innerHTML = `<p class="hint">QRコードを読み込めませんでした。通信環境をご確認のうえ、もう一度お試しください。</p>`;
+    }
+  }
+
+  // ---------- お客様ご自身のスマホで開く、会員証の単独ページ(#card<id>) ----------
+  // PIN・スタッフコード不要の公開ページ。ブックマークやホーム画面追加で
+  // いつでも開き直せるようにする。
+  function memberCardPageHtml(m) {
+    return `
+      <div class="checkin-card">
+        <div class="pc-avatar" style="margin:0 auto 10px;">${escapeHtml(initials(m.name))}</div>
+        <h2 class="checkin-title">${escapeHtml(m.name || "名前未設定")}さんの会員証</h2>
+        <p class="checkin-sub">${escapeHtml(tierOf(m).label)}・スタンプ ${m.points || 0}pt</p>
+        <div class="qr-card-wrap" style="margin-top:14px;">
+          <div id="memberCardQrCanvas" class="qr-card-canvas"></div>
+        </div>
+        <p class="hint" style="margin-top:14px;">来店時にスタッフの端末でこのQRを読み取ってもらうと、お会計がスムーズです。このページをホーム画面に追加しておくと、いつでもすぐに開けます。</p>
+      </div>
+    `;
+  }
+  function bindMemberCardPage(m) {
+    const holder = document.getElementById("memberCardQrCanvas");
     if (holder && window.QRCode) {
       try {
         new QRCode(holder, {

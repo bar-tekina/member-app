@@ -57,6 +57,8 @@
 }
 
 * { box-sizing: border-box; }
+/* 個別のコンポーネントが display を直接指定していても、hidden 属性を確実に効かせる */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0;

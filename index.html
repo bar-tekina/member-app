@@ -1112,12 +1112,16 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     return state.members.filter((m) => m.referredBy && m.referredBy.id === memberId).length;
   }
 
-  // ---- 会員ランク(来店で積み上がる累計ポイントで判定。特典利用で現在ポイントが
-  // 0に戻ってもランクは下がらない) ----
+  // ---- 会員ランク判定(ハイブリッド方式) ----
+  // 「累計スタンプ数」(来店頻度)と「累計利用金額」(客単価)のどちらかを
+  // 満たせばランクアップするOR条件。頻度型の常連も、単価型の太客も
+  // どちらも正しく上位ランクに評価できるようにしている。
+  // (特典利用でその場のポイントが0付近に戻っても、ここで使う累計値=
+  // totalPointsEarned/totalSpend は減らないため、ランクは下がらない)
   const TIERS = [
-    { key: "vip", label: "VIP", min: 40 },
-    { key: "gold", label: "GOLD", min: 15 },
-    { key: "regular", label: "REGULAR", min: 0 },
+    { key: "vip", label: "VIP", min: 40, minSpend: 150000 },
+    { key: "gold", label: "GOLD", min: 15, minSpend: 50000 },
+    { key: "regular", label: "REGULAR", min: 0, minSpend: 0 },
   ];
   // 失効ルール: 累計実績だけで判定すると「以前は頻繁に来ていたが、その後
   // 全く来なくなった会員」もずっとVIP/GOLDのまま表示されてしまい、
@@ -1142,13 +1146,14 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   function lifetimePointsOf(m) {
     return (m.totalPointsEarned != null ? m.totalPointsEarned : m.points) || 0;
   }
-  function pureTierIdxOf(total) {
-    const idx = TIERS.findIndex((t) => total >= t.min);
+  function pureTierIdxOf(total, spend) {
+    const idx = TIERS.findIndex((t) => total >= t.min || spend >= t.minSpend);
     return idx === -1 ? TIERS.length - 1 : idx;
   }
   function tierOf(m) {
     const total = lifetimePointsOf(m);
-    let idx = pureTierIdxOf(total);
+    const spend = m.totalSpend || 0;
+    let idx = pureTierIdxOf(total, spend);
     if (idx < TIERS.length - 1) {
       const lastTs = lastVisitTsOf(m);
       if (lastTs != null) {
@@ -1170,7 +1175,8 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   }
   function tierNextInfo(m) {
     const total = lifetimePointsOf(m);
-    const pureIdx = pureTierIdxOf(total);
+    const spend = m.totalSpend || 0;
+    const pureIdx = pureTierIdxOf(total, spend);
     const tier = tierOf(m);
     const idx = TIERS.findIndex((t) => t.key === tier.key);
     if (idx > pureIdx) {
@@ -1179,7 +1185,11 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     }
     const next = idx > 0 ? TIERS[idx - 1] : null;
     if (!next) return "最上位ランクです";
-    return `${next.label}まであと${next.min - total}pt`;
+    // スタンプ・利用金額のどちらか一方を満たせばランクアップするため、
+    // 両方の残り(どちらか早い方で達成)を案内する。
+    const ptGap = Math.max(0, next.min - total);
+    const spendGap = Math.max(0, next.minSpend - spend);
+    return `${next.label}まであと${ptGap}pt、または¥${spendGap.toLocaleString()}の利用`;
   }
 
   // ---- 会計(レジ)の金額計算 ----

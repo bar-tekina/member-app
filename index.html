@@ -2368,25 +2368,28 @@ Barてきな？ 一同`;
   }
   // 休眠会員リスト(60日以上来店なし)の表示部分。オーナー専用の「分析」タブと、
   // スタッフも見られる「休眠会員」タブの両方から呼び出す共通関数。
-  function dormantListSectionHtml() {
+  // showMailButton: 案内メールボタンを表示するか。オーナー専用の分析タブでは
+  // true、スタッフも見られる休眠会員タブでは false にして、メール送信は
+  // オーナーだけが行える操作のままにしている。
+  function dormantListSectionHtml(showMailButton) {
     const dormant = dormantMembers();
     return `
       ${dormant.length ? `
         <ul class="visit-log dormant-list">
           ${dormant.map((d) => {
-            const mailLink = reengageMailtoLink(d.m);
+            const mailLink = showMailButton ? reengageMailtoLink(d.m) : null;
             return `
               <li class="dormant-item">
                 <span>${escapeHtml(d.m.name || "名前未設定")}</span>
                 <span class="amt">${d.daysSince == null ? "来店記録なし" : d.daysSince + "日前"}</span>
                 ${mailLink
                   ? `<a class="btn btn-ghost dormant-mail-btn" href="${mailLink}">✉️ 案内メールを送る</a>`
-                  : `<span class="dormant-no-email">メール未登録</span>`}
+                  : (showMailButton ? `<span class="dormant-no-email">メール未登録</span>` : "")}
               </li>
             `;
           }).join("")}
         </ul>
-        <p class="hint">「案内メールを送る」を押すと、名前入りの案内文を入れた状態でメールアプリが開きます。内容を確認してから送信してください。メールアドレス未登録の方は、次回来店時に編集画面から追加できます。</p>
+        ${showMailButton ? `<p class="hint">「案内メールを送る」を押すと、名前入りの案内文を入れた状態でメールアプリが開きます。内容を確認してから送信してください。メールアドレス未登録の方は、次回来店時に編集画面から追加できます。</p>` : ""}
       ` : `<p class="hint">直近60日以内に来店していない会員はいません。</p>`}
     `;
   }
@@ -2396,7 +2399,7 @@ Barてきな？ 一同`;
     }
     return `
       <div class="section-title">来店が途絶えているお客様(60日以上来店なし)</div>
-      ${dormantListSectionHtml()}
+      ${dormantListSectionHtml(false)}
     `;
   }
   function referralLeaders() {
@@ -2525,7 +2528,7 @@ Barてきな？ 一同`;
       ` : `<p class="hint">まだ紹介で登録した会員がいません。</p>`}
 
       <div class="section-title">来店が途絶えているお客様(60日以上来店なし)</div>
-      ${dormantListSectionHtml()}
+      ${dormantListSectionHtml(true)}
 
       <div class="section-title">お客様の声(アンケート・最新50件)</div>
       ${state.feedback.length ? `

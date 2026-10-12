@@ -823,6 +823,11 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 .staff-card-actions .btn { padding: 5px 14px; font-size: 12px; }
 .staff-card-delete { color: var(--danger-bright); border-color: var(--danger); }
 
+/* 会員証QRのリアルタイムスキャン */
+.qr-scan-wrap { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 58vh; background: #000; border-radius: 14px; overflow: hidden; }
+.qr-scan-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.qr-scan-frame { position: absolute; inset: 14%; border: 3px solid var(--pink-bright); border-radius: 16px; box-shadow: 0 0 0 9999px rgba(0,0,0,0.4); pointer-events: none; }
+
 /* お客様アンケート(感想フォーム)の星評価 */
 .feedback-star-row { display: flex; gap: 6px; }
 .feedback-star {
@@ -1415,6 +1420,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   }
 
   function closeSheet() {
+    stopQrScanner();
     state.staffSheetOpen = false;
     $sheetBackdrop.classList.remove("open");
     setTimeout(() => { $sheetBody.innerHTML = ""; }, 200);
@@ -3430,7 +3436,21 @@ Barてきな？ 一同`;
     const $qrBtn = root.querySelector("#regQrBtn");
     const $qrFile = root.querySelector("#regQrFile");
     if ($qrBtn && $qrFile) {
-      $qrBtn.addEventListener("click", () => $qrFile.click());
+      $qrBtn.addEventListener("click", () => {
+        openLiveQrScanner(
+          (member) => {
+            reg.memberId = member.id;
+            reg.memberLabel = member.name || "名前未設定";
+            reg.memberQuery = "";
+            showToast(`${member.name || "会員"}さんを読み取りました`);
+            render();
+          },
+          () => {
+            showToast("カメラでの自動読み取りが使えないため、写真を1枚撮って読み取ります。");
+            $qrFile.click();
+          }
+        );
+      });
       $qrFile.addEventListener("change", (e) => {
         const file = e.target.files && e.target.files[0];
         if (!file) return;
@@ -3704,7 +3724,15 @@ Barてきな？ 一同`;
     reader.readAsDataURL(file);
   }
 
-  // ---------- 会員証QRの画像を読み取って会員を特定する(店員アプリのカメラで撮影) ----------
+  // QRコードの中身(URLまたは生の文字列)から会員IDを取り出す共通処理。
+  // "https://.../#mXXXX" の形式でも、"mXXXX" 単体でも拾えるようにしている。
+  function parseMemberIdFromQrText(text) {
+    if (!text) return null;
+    const m = /#m([a-zA-Z0-9_-]+)/.exec(text) || /^m([a-zA-Z0-9_-]+)$/.exec(text);
+    return m ? m[1] : null;
+  }
+
+  // ---------- 会員証QRの画像を読み取って会員を特定する(写真1枚方式。フォールバック用) ----------
   function decodeMemberQrFile(file, callback) {
     const reader = new FileReader();
     reader.onload = (ev) => {
@@ -3725,8 +3753,7 @@ Barてきな？ 一同`;
           code = null;
         }
         if (!code || !code.data) { callback(null); return; }
-        const m = /#m([a-zA-Z0-9_-]+)/.exec(code.data) || /^m([a-zA-Z0-9_-]+)$/.exec(code.data);
-        const id = m ? m[1] : null;
+        const id = parseMemberIdFromQrText(code.data);
         const member = id ? state.members.find((x) => x.id === id) : null;
         callback(member || null);
       };
@@ -3735,6 +3762,86 @@ Barてきな？ 一同`;
     };
     reader.onerror = () => callback(null);
     reader.readAsDataURL(file);
+  }
+
+  // ---------- 会員証QRをカメラにかざして自動で読み取る(リアルタイムスキャン) ----------
+  // 「写真を1枚撮ってから解析する」方式だと、暗い店内で別のスマホの画面に
+  // 表示されたQRを撮影する場合などに反射・ピンボケで失敗しやすい。
+  // 映像を継続的に解析し続けて自動認識する方式にすることで、角度や距離を
+  // その場で微調整しながら読み取れるようにしている。
+  // カメラが使えない端末(権限なし・非対応ブラウザなど)では、従来の
+  // 「写真を1枚撮る」方式に自動でフォールバックする。
+  let qrScannerStream = null;
+  let qrScannerRAF = null;
+  function stopQrScanner() {
+    if (qrScannerRAF) { cancelAnimationFrame(qrScannerRAF); qrScannerRAF = null; }
+    if (qrScannerStream) {
+      qrScannerStream.getTracks().forEach((t) => t.stop());
+      qrScannerStream = null;
+    }
+  }
+  function openLiveQrScanner(onFound, onUnavailable) {
+    const html = `
+      <div class="sheet-header">
+        <h2>会員証QRを読み取る</h2>
+        <button class="sheet-close" id="closeQrScan" aria-label="閉じる">×</button>
+      </div>
+      <div class="qr-scan-wrap">
+        <video id="qrScanVideo" playsinline autoplay muted></video>
+        <div class="qr-scan-frame"></div>
+      </div>
+      <p class="hint" id="qrScanHint">お客様の会員証QRにカメラをかざしてください。自動で読み取ります。</p>
+    `;
+    openSheet(html);
+    const $video = document.getElementById("qrScanVideo");
+    const $hint = document.getElementById("qrScanHint");
+    document.getElementById("closeQrScan").addEventListener("click", closeSheet);
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.jsQR) {
+      closeSheet();
+      if (onUnavailable) onUnavailable();
+      return;
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
+      .then((stream) => {
+        qrScannerStream = stream;
+        $video.srcObject = stream;
+        $video.play().catch(() => {});
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        const tick = () => {
+          if (!qrScannerStream) return; // 既に停止済み
+          if ($video.readyState === $video.HAVE_ENOUGH_DATA) {
+            canvas.width = $video.videoWidth;
+            canvas.height = $video.videoHeight;
+            ctx.drawImage($video, 0, 0, canvas.width, canvas.height);
+            let code = null;
+            try {
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              code = window.jsQR(imageData.data, imageData.width, imageData.height);
+            } catch (err) { code = null; }
+            if (code && code.data) {
+              const id = parseMemberIdFromQrText(code.data);
+              const member = id ? state.members.find((x) => x.id === id) : null;
+              if (member) {
+                stopQrScanner();
+                closeSheet();
+                onFound(member);
+                return;
+              } else if ($hint) {
+                $hint.textContent = "読み取れましたが、該当する会員が見つかりませんでした。もう一度かざしてください。";
+              }
+            }
+          }
+          qrScannerRAF = requestAnimationFrame(tick);
+        };
+        qrScannerRAF = requestAnimationFrame(tick);
+      })
+      .catch(() => {
+        closeSheet();
+        if (onUnavailable) onUnavailable();
+      });
   }
 
   // ---------- 本人確認書類を拡大表示 ----------

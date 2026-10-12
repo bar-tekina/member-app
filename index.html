@@ -825,6 +825,12 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 .staff-card-actions .btn { padding: 5px 14px; font-size: 12px; }
 .staff-card-delete { color: var(--danger-bright); border-color: var(--danger); }
 
+/* 来店確認(入口QR。#checkin) */
+.checkin-card { max-width: 420px; margin: 18vh auto 0; text-align: center; padding: 32px 22px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 18px; }
+.checkin-check { width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 50%; background: linear-gradient(135deg, var(--pink), var(--pink-bright)); color: #fff; font-size: 32px; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 24px var(--pink-glow); }
+.checkin-title { margin: 0 0 6px; font-size: 20px; }
+.checkin-sub { margin: 0; color: var(--fg-dim); font-size: 13px; font-family: var(--tnum); }
+
 /* 会員証QRのリアルタイムスキャン */
 .qr-scan-wrap { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 58vh; background: #000; border-radius: 14px; overflow: hidden; }
 .qr-scan-wrap video { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -1135,6 +1141,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     unlocked: false, staffCode: null, staffGranted: false, staffGateChecked: false,
     pendingEntryMemberId: null, publicJoinMode: false, publicJoinDone: false,
     publicFeedbackMode: false,
+    publicCheckinMode: false,
     publicReserveMode: false, reserveFormMonth: null, reserveFormDate: null,
     guestSales: [], guestSalesReady: false,
     visitLog: [], visitLogReady: false,
@@ -1220,6 +1227,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     const hash = (location.hash || "").replace(/^#/, "");
     if (hash === "join") { state.publicJoinMode = true; return; }
     if (hash === "feedback") { state.publicFeedbackMode = true; return; }
+    if (hash === "checkin") { state.publicCheckinMode = true; return; }
     if (hash === "reserve") { state.publicReserveMode = true; return; }
     const m = /^m([a-zA-Z0-9_-]{4,})$/.exec(hash);
     if (m) state.pendingEntryMemberId = m[1];
@@ -2053,6 +2061,28 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       $staffSelfRegBtn.hidden = true;
       $main.innerHTML = feedbackFormHtml();
       bindFeedbackForm($main);
+      return;
+    }
+
+    if (state.publicCheckinMode) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      $lockBtn.hidden = true;
+      $staffCodeBtn.hidden = true;
+      $pricingBtn.hidden = true;
+      $staffSelfRegBtn.hidden = true;
+      const now = new Date();
+      const dateStr = now.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+      const timeStr = now.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+      $main.innerHTML = `
+        <div class="checkin-card">
+          <div class="checkin-check">✓</div>
+          <h2 class="checkin-title">ご来店を確認しました</h2>
+          <p class="checkin-sub">${escapeHtml(dateStr)} ${escapeHtml(timeStr)}</p>
+          <p class="hint" style="margin-top:14px;">本日もBarてきな？にお越しいただき、ありがとうございます。会員の方は、お会計の際にスタッフへ会員証QRをご提示ください。</p>
+        </div>
+      `;
       return;
     }
 

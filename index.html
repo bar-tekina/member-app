@@ -4145,14 +4145,24 @@ Barてきな？ 一同`;
       () => { state.reservationsReady = true; render(); }
     );
     // スタッフ一覧(在籍記録。オーナー専用コード画面内に表示)
-    state.db.collection("staff").orderBy("createdAt", "asc").onSnapshot(
-      (snap) => {
-        state.staffList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        state.staffListReady = true;
-        if (state.staffSheetOpen) renderStaffListIntoSheet();
-      },
-      () => { state.staffListReady = true; }
-    );
+    // Firestoreのルールが一時的に古い状態だった場合などに一度エラーになると、
+    // onSnapshot はそのまま停止してしまい、後でルールを直してもページを
+    // 再読み込みするまで一覧が復活しない。それを避けるため、エラー時は
+    // 少し待って自動的に購読し直す。
+    function subscribeStaffList() {
+      state.db.collection("staff").orderBy("createdAt", "asc").onSnapshot(
+        (snap) => {
+          state.staffList = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          state.staffListReady = true;
+          if (state.staffSheetOpen) renderStaffListIntoSheet();
+        },
+        () => {
+          state.staffListReady = true;
+          setTimeout(subscribeStaffList, 5000);
+        }
+      );
+    }
+    subscribeStaffList();
     state.db.collection("visitLog").onSnapshot(
       (snap) => {
         state.visitLog = snap.docs.map((d) => ({ id: d.id, ...d.data() }));

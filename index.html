@@ -655,6 +655,8 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; 
 .referrer-results .rr-item:active { background: var(--bg-elev); }
 .referrer-results .rr-item .rr-sub { color: var(--fg-faint); font-size: 11.5px; }
 .referrer-results .rr-empty { padding: 10px 12px; font-size: 12.5px; color: var(--fg-faint); }
+.reg-member-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.reg-member-chips .referrer-chip { margin-top: 0; }
 .referrer-chip {
   margin-top: 8px;
   display: inline-flex;
@@ -1121,7 +1123,9 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   function createEmptyRegister() {
     return {
       course: { male: 0, female: 0 }, tanpinCount: 0,
-      extensions: 0, menu: {}, customItems: [], memberId: null, memberLabel: "", guest: false, memberQuery: "",
+      // members: 会計対象として選んだ会員の配列({id,label})。飲み放題などで
+      // 会員と非会員が同じグループにいる場合、複数人をここに追加できる。
+      extensions: 0, menu: {}, customItems: [], members: [], guest: false, memberQuery: "",
       registerView: "course", // "course"(飲み放題) | "tanpin"(単品) — 会計画面でどちらをスワイプ表示中か
     };
   }
@@ -1230,8 +1234,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     if (!member) { showToast("会員情報が見つかりませんでした"); return; }
     state.tab = "register";
     state.register = createEmptyRegister();
-    state.register.memberId = member.id;
-    state.register.memberLabel = member.name || "名前未設定";
+    state.register.members = [{ id: member.id, label: member.name || "名前未設定" }];
     showToast(`${member.name || "会員"}さんを会計対象にセットしました`);
     render();
   }
@@ -3169,7 +3172,11 @@ Barてきな？ 一同`;
   function registerTabHtml() {
     const reg = state.register;
     const total = registerTotal(reg);
-    const canConfirm = (reg.memberId || reg.guest) && registerHasItems(reg);
+    const canConfirm = (reg.members.length > 0 || reg.guest) && registerHasItems(reg);
+
+    // 飲み放題などで入力した総人数(人数が分かる単品チャージも含む)。会員が
+    // 複数人いる場合、合計金額をこの人数で割って1人あたりの金額を出す基準に使う。
+    const regHeadcount = (reg.course.male || 0) + (reg.course.female || 0) + (reg.tanpinCount || 0);
 
     let targetHtml;
     if (reg.guest) {
@@ -3179,22 +3186,30 @@ Barてきな？ 一同`;
           <button type="button" class="rr-clear" id="regGuestClear" aria-label="クリア">×</button>
         </div>
       `;
-    } else if (reg.memberId) {
-      targetHtml = `
-        <div class="referrer-chip">
-          <span>${escapeHtml(reg.memberLabel)}さん</span>
-          <button type="button" class="rr-clear" id="regMemberClear" aria-label="クリア">×</button>
-        </div>
-      `;
     } else {
+      const chipsHtml = reg.members.length ? `
+        <div class="reg-member-chips">
+          ${reg.members.map((mm) => `
+            <div class="referrer-chip">
+              <span>${escapeHtml(mm.label)}さん</span>
+              <button type="button" class="rr-clear" data-member-remove="${mm.id}" aria-label="削除">×</button>
+            </div>
+          `).join("")}
+        </div>
+      ` : "";
       targetHtml = `
-        <button type="button" class="btn btn-primary" id="regQrBtn" style="width:100%;">📷 会員証QRを読み取る</button>
+        ${chipsHtml}
+        <button type="button" class="btn btn-primary" id="regQrBtn" style="width:100%;">📷 会員証QRを読み取る${reg.members.length ? "(もう1人追加)" : ""}</button>
         <input type="file" accept="image/*" capture="environment" id="regQrFile" style="display:none;">
         <div class="referrer-picker" style="margin-top:8px;">
           <input type="text" id="regMemberSearch" placeholder="会員を名前・電話番号で検索" value="${escapeHtml(reg.memberQuery || "")}" autocomplete="off">
           <div class="referrer-results" id="regMemberResults" ${reg.memberQuery ? "" : "hidden"}></div>
         </div>
-        <button type="button" class="btn btn-ghost" id="regGuestBtn" style="margin-top:8px;width:100%;">会員を選ばず一般客として記録する</button>
+        ${reg.members.length === 0
+          ? `<button type="button" class="btn btn-ghost" id="regGuestBtn" style="margin-top:8px;width:100%;">会員を選ばず一般客として記録する</button>`
+          : (regHeadcount > reg.members.length
+              ? `<p class="hint">人数${regHeadcount}名のうち会員${reg.members.length}名を選択中。会計確定時に金額を人数で按分し、会員選択分は各会員の来店記録に、残りは一般客の売上として自動で記録されます。</p>`
+              : `<p class="hint">グループに会員以外の方もいる場合は、上の人数欄も実際の人数に合わせて入力してください。金額が人数で按分されます。</p>`)}
       `;
     }
 
@@ -3325,7 +3340,7 @@ Barてきな？ 一同`;
         <div class="action-row">
           <button type="button" class="btn btn-primary" id="regConfirm" ${canConfirm ? "" : "disabled"}>会計確定</button>
         </div>
-        <p class="hint">会員を選んで確定すると、来店履歴・スタンプ・ランクに自動反映されます。一般客として記録した会計は売上集計にのみ含まれます。</p>
+        <p class="hint">会員を選んで確定すると、来店履歴・スタンプ・ランクに自動反映されます(複数人選ぶと全員に反映されます)。一般客として記録した分は売上集計にのみ含まれます。</p>
       </div>
     `;
   }
@@ -3426,12 +3441,30 @@ Barてきな？ 一同`;
       });
     });
 
+    // 会員を会計対象に追加する共通処理(QRスキャン・写真・検索のどこから追加
+    // しても同じ扱いにする)。同じ会員を重複して追加しないようにする。
+    function addMemberToRegister(member) {
+      if (!member) return false;
+      if (reg.members.some((mm) => mm.id === member.id)) {
+        showToast(`${member.name || "会員"}さんは既に追加されています`);
+        return false;
+      }
+      reg.members.push({ id: member.id, label: member.name || "名前未設定" });
+      reg.memberQuery = "";
+      return true;
+    }
+
     const $guestBtn = root.querySelector("#regGuestBtn");
     if ($guestBtn) $guestBtn.addEventListener("click", () => { reg.guest = true; render(); });
     const $guestClear = root.querySelector("#regGuestClear");
     if ($guestClear) $guestClear.addEventListener("click", () => { reg.guest = false; render(); });
-    const $memberClear = root.querySelector("#regMemberClear");
-    if ($memberClear) $memberClear.addEventListener("click", () => { reg.memberId = null; reg.memberLabel = ""; reg.memberQuery = ""; render(); });
+    root.querySelectorAll("[data-member-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.memberRemove;
+        reg.members = reg.members.filter((mm) => mm.id !== id);
+        render();
+      });
+    });
 
     const $qrBtn = root.querySelector("#regQrBtn");
     const $qrFile = root.querySelector("#regQrFile");
@@ -3439,10 +3472,7 @@ Barてきな？ 一同`;
       $qrBtn.addEventListener("click", () => {
         openLiveQrScanner(
           (member) => {
-            reg.memberId = member.id;
-            reg.memberLabel = member.name || "名前未設定";
-            reg.memberQuery = "";
-            showToast(`${member.name || "会員"}さんを読み取りました`);
+            if (addMemberToRegister(member)) showToast(`${member.name || "会員"}さんを読み取りました`);
             render();
           },
           () => {
@@ -3457,10 +3487,7 @@ Barてきな？ 一同`;
         decodeMemberQrFile(file, (member) => {
           $qrFile.value = "";
           if (member) {
-            reg.memberId = member.id;
-            reg.memberLabel = member.name || "名前未設定";
-            reg.memberQuery = "";
-            showToast(`${member.name || "会員"}さんを読み取りました`);
+            if (addMemberToRegister(member)) showToast(`${member.name || "会員"}さんを読み取りました`);
             render();
           } else {
             showToast("QRコードを認識できませんでした。もう一度お試しください。");
@@ -3491,12 +3518,8 @@ Barてきな？ 一同`;
           $memberResults.querySelectorAll(".rr-item").forEach((el) => {
             el.addEventListener("click", () => {
               const member = state.members.find((x) => x.id === el.dataset.id);
-              if (member) {
-                reg.memberId = member.id;
-                reg.memberLabel = member.name || "名前未設定";
-                reg.memberQuery = "";
-                render();
-              }
+              if (member) addMemberToRegister(member);
+              render();
             });
           });
         }
@@ -3513,25 +3536,57 @@ Barてきな？ 一同`;
         $confirm.disabled = true;
         const total = registerTotal(reg);
         const note = registerBreakdownText(reg);
+        const authOk = await ensureAnonymousAuth();
+        if (!authOk) {
+          showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+          $confirm.disabled = false;
+          return;
+        }
         try {
-          if (reg.memberId) {
-            const member = state.members.find((x) => x.id === reg.memberId);
-            if (!member) { showToast("会員情報が見つかりません"); $confirm.disabled = false; return; }
-            await recordVisit(member, total, note);
-            showToast(`${member.name || "会員"}さんの会計(¥${total.toLocaleString()})を記録しました`);
+          if (reg.members.length > 0) {
+            // 会員が複数人いる場合、合計金額を人数で按分する。按分の基準人数は
+            // 「飲み放題/単品で入力した総人数」と「選んだ会員の人数」の大きい方
+            // (人数未入力でも選んだ会員の人数では必ず割れるようにするため)。
+            const headcount = (reg.course.male || 0) + (reg.course.female || 0) + (reg.tanpinCount || 0);
+            const denom = Math.max(reg.members.length, headcount || reg.members.length);
+            const base = Math.floor(total / denom);
+            const remainder = total % denom;
+            const shares = [];
+            for (let i = 0; i < denom; i++) shares.push(base + (i < remainder ? 1 : 0));
+            const memberShares = shares.slice(0, reg.members.length);
+            const memberTotal = memberShares.reduce((a, b) => a + b, 0);
+            const guestPortion = total - memberTotal;
+            const isSplit = reg.members.length > 1 || guestPortion > 0;
+            const names = [];
+            for (let i = 0; i < reg.members.length; i++) {
+              const member = state.members.find((x) => x.id === reg.members[i].id);
+              if (!member) continue;
+              const splitNote = isSplit ? `${note}(${reg.members.length}名で按分・1人分¥${memberShares[i].toLocaleString()})` : note;
+              await withAuthRetry(() => recordVisit(member, memberShares[i], splitNote));
+              names.push(member.name || "会員");
+            }
+            if (guestPortion > 0) {
+              await withAuthRetry(() => state.db.collection("guestSales").add({
+                amount: guestPortion,
+                note: `${note}(会員${reg.members.length}名以外の按分分)`,
+                date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
+                createdAt: new Date().toISOString(),
+              }));
+            }
+            showToast(`${names.join("・")}さんの会計(合計¥${total.toLocaleString()})を記録しました`);
           } else {
-            await state.db.collection("guestSales").add({
+            await withAuthRetry(() => state.db.collection("guestSales").add({
               amount: total,
               note,
               date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
               createdAt: new Date().toISOString(),
-            });
+            }));
             showToast(`一般客の会計(¥${total.toLocaleString()})を記録しました`);
           }
           state.register = createEmptyRegister();
           render();
         } catch (err) {
-          showToast("記録に失敗しました。もう一度お試しください。");
+          showToast("記録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
           $confirm.disabled = false;
         }
       });

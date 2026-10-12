@@ -1005,7 +1005,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       </div>
       <div class="brand-text">
         <div class="eyebrow">Darts &amp; Game Bar</div>
-        <h1>Bar<span class="accent">てきな？</span> スタッフ専用アプリ</h1>
+        <h1 id="appTitle">Bar<span class="accent">てきな？</span> スタッフ専用アプリ</h1>
       </div>
       <button class="lock-btn" id="staffSelfRegBtn" aria-label="スタッフ登録" hidden>📝</button>
       <button class="lock-btn" id="pricingBtn" aria-label="料金設定" hidden>💴</button>
@@ -1398,6 +1398,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
   const $staffSelfRegBtn = document.getElementById("staffSelfRegBtn");
   const $scoreboard = document.getElementById("scoreboard");
   const $tabsNav = document.querySelector("nav.tabs");
+  const $appTitle = document.getElementById("appTitle");
 
   function applyLockUI() {
     $lockBtn.classList.toggle("unlocked", state.unlocked);
@@ -1405,6 +1406,9 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     $staffCodeBtn.hidden = !state.unlocked;
     $pricingBtn.hidden = !state.unlocked;
     $staffSelfRegBtn.hidden = !state.staffGranted;
+    if ($appTitle) {
+      $appTitle.innerHTML = `Bar<span class="accent">てきな？</span> ${state.unlocked ? "オーナー専用アプリ" : "スタッフ専用アプリ"}`;
+    }
     document.querySelectorAll("nav.tabs button").forEach((btn) => {
       const restricted = RESTRICTED_TABS.includes(btn.dataset.tab);
       btn.hidden = restricted && !state.unlocked;

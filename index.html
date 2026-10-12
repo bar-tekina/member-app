@@ -1482,6 +1482,10 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   document.querySelectorAll("nav.tabs button").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (RESTRICTED_TABS.includes(btn.dataset.tab) && !state.unlocked) { openPinSheet(); return; }
+      // タブ切り替え時にシートが開いたままだと、特にQRスキャン中はカメラの
+      // 映像がバックグラウンドで動き続けてしまう(バッテリー消費・プライバシー上
+      // 問題)。タブを切り替えたら開いているシートは必ず閉じる。
+      closeSheet();
       document.querySelectorAll("nav.tabs button").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       state.tab = btn.dataset.tab;
@@ -3923,7 +3927,13 @@ Barてきな？ 一同`;
   // 「写真を1枚撮る」方式に自動でフォールバックする。
   let qrScannerStream = null;
   let qrScannerRAF = null;
+  // getUserMedia()の許可待ち中にシートを閉じられるケースに対応するための
+  // 世代カウンタ。stopQrScanner()を呼ぶたびに値を進め、各openLiveQrScanner()
+  // 呼び出し開始時点のトークンと比較することで、「閉じた後に許可が出て
+  // カメラが宙に浮いたまま動き続ける」という競合状態を防ぐ。
+  let qrScannerToken = 0;
   function stopQrScanner() {
+    qrScannerToken++;
     if (qrScannerRAF) { cancelAnimationFrame(qrScannerRAF); qrScannerRAF = null; }
     if (qrScannerStream) {
       qrScannerStream.getTracks().forEach((t) => t.stop());
@@ -3931,6 +3941,7 @@ Barてきな？ 一同`;
     }
   }
   function openLiveQrScanner(onFound, onUnavailable) {
+    const myToken = ++qrScannerToken;
     const html = `
       <div class="sheet-header">
         <h2>会員証QRを読み取る</h2>
@@ -3955,13 +3966,19 @@ Barてきな？ 一同`;
 
     navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
       .then((stream) => {
+        if (myToken !== qrScannerToken) {
+          // 許可が出るまでの間にシートが閉じられた(別のスキャンが始まった等)。
+          // 宙に浮いたストリームを即座に停止して捨てる。
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
         qrScannerStream = stream;
         $video.srcObject = stream;
         $video.play().catch(() => {});
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
         const tick = () => {
-          if (!qrScannerStream) return; // 既に停止済み
+          if (myToken !== qrScannerToken) return; // 既に停止済み
           if ($video.readyState === $video.HAVE_ENOUGH_DATA) {
             canvas.width = $video.videoWidth;
             canvas.height = $video.videoHeight;
@@ -3989,6 +4006,7 @@ Barてきな？ 一同`;
         qrScannerRAF = requestAnimationFrame(tick);
       })
       .catch((err) => {
+        if (myToken !== qrScannerToken) return; // 既に無効化された呼び出し
         closeSheet();
         const reason = err && err.name === "NotAllowedError" ? "denied"
           : err && err.name === "NotFoundError" ? "nocamera"

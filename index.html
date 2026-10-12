@@ -1120,7 +1120,27 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     feedback: [], feedbackReady: false,
     reservations: [], reservationsReady: false, resTabMonth: null, resTabDate: null,
     staffList: [], staffListReady: false, staffSheetOpen: false,
+    authReady: false,
   };
+
+  // ---- 匿名認証(保存・編集系の操作の前に必ずこれを通す) ----
+  // 電波が弱い端末などでは signInAnonymously() が一時的に失敗することがあり、
+  // それを無視したまま進むと、見た目は会員一覧なども表示されているのに
+  // 保存だけ「Missing or insufficient permissions」で失敗する、という
+  // わかりにくい状態になる。保存系の操作の直前に毎回これを呼び、
+  // 未認証ならその場でもう一度サインインを試みてから書き込む。
+  async function ensureAnonymousAuth() {
+    if (firebase.auth().currentUser) { state.authReady = true; return true; }
+    for (let i = 0; i < 3; i++) {
+      try {
+        await firebase.auth().signInAnonymously();
+        if (firebase.auth().currentUser) { state.authReady = true; return true; }
+      } catch (err) { /* 次のリトライへ */ }
+      await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+    }
+    state.authReady = false;
+    return false;
+  }
 
   // ---- 会員の入店QRコード(スキャンで会計対象に自動セット) ----
   // 会員ごとのQRを開くと #m<会員ID> のハッシュ付きでこのページが開く。
@@ -1659,6 +1679,12 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       }
       const submitBtn = e.target.querySelector("button[type=submit]");
       submitBtn.disabled = true;
+      const authOk = await ensureAnonymousAuth();
+      if (!authOk) {
+        showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+        submitBtn.disabled = false;
+        return;
+      }
       try {
         if (existing) {
           await state.db.collection("staff").doc(existing.id).update(payload);
@@ -2319,6 +2345,13 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       const submitBtn = form.querySelector("button[type=submit]");
       submitBtn.disabled = true;
       submitBtn.textContent = "登録中…";
+      const authOk = await ensureAnonymousAuth();
+      if (!authOk) {
+        showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "この内容で登録する";
+        return;
+      }
       try {
         // ---- 不正防止(再チェック): 上の重複チェックは手元の端末に同期済みの
         // データだけを見ているため、ほぼ同時刻に別の端末(他のお客様のスマホなど)
@@ -2427,6 +2460,13 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       const submitBtn = form.querySelector("button[type=submit]");
       submitBtn.disabled = true;
       submitBtn.textContent = "送信中…";
+      const authOk = await ensureAnonymousAuth();
+      if (!authOk) {
+        showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "送信する";
+        return;
+      }
       try {
         await state.db.collection("feedback").add({
           rating,
@@ -2939,6 +2979,13 @@ Barてきな？ 一同`;
       const submitBtn = form.querySelector("button[type=submit]");
       submitBtn.disabled = true;
       submitBtn.textContent = "送信中…";
+      const authOk = await ensureAnonymousAuth();
+      if (!authOk) {
+        showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "予約を送信する";
+        return;
+      }
       try {
         await state.db.collection("reservations").add({
           date: state.reserveFormDate,
@@ -3921,6 +3968,11 @@ Barてきな？ 一同`;
       } else if (existingDoc && $idType.value !== (existingDoc.type || "")) {
         payload.idDocument = { ...existingDoc, type: $idType.value || "other" };
       }
+      const authOk = await ensureAnonymousAuth();
+      if (!authOk) {
+        showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+        return;
+      }
       await state.db.collection("members").doc(m.id).update(payload);
       closeSheet();
       showToast("会員情報を更新しました");
@@ -3997,15 +4049,10 @@ Barてきな？ 一同`;
       return;
     }
     // ---- 匿名認証(第三者がFirestoreへ直接アクセスするのを防ぐため) ----
-    // Firebaseコンソール側で「匿名」サインインが有効になっていない間は、
-    // このサインインは失敗するが、セキュリティルールがまだ全公開のうちは
-    // 動作に影響しないよう、エラーは無視してそのまま続行する。
-    try {
-      await firebase.auth().signInAnonymously();
-    } catch (err) {
-      // 匿名認証が未設定、または通信エラー。ルール側で認証必須にした後は
-      // ここが失敗すると保存機能が使えなくなるため、設定を確認すること。
-    }
+    // 電波が弱い環境などで最初のサインインが失敗しても、ensureAnonymousAuth()が
+    // 数回リトライする。それでも失敗した場合は閲覧(キャッシュ)はできても
+    // 保存ができない状態になるため、保存系の操作の直前にも毎回呼び直す。
+    await ensureAnonymousAuth();
     state.db = db;
     state.db.collection("members").orderBy("name", "asc").onSnapshot(
       (snap) => {

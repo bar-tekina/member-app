@@ -806,6 +806,30 @@ ul.reg-custom-list li .amt { color: var(--gold-bright); }
 ul.visit-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; }
 ul.visit-log li { font-size: 12.5px; color: var(--fg-dim); display: flex; justify-content: space-between; border-bottom: 1px dashed var(--line); padding-bottom: 5px; }
 ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
+ul.visit-log.dormant-list { max-height: none; }
+ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.dormant-mail-btn { font-size: 11.5px; padding: 4px 10px; text-decoration: none; }
+.dormant-no-email { font-size: 11px; color: var(--fg-faint); }
+
+/* お客様アンケート(感想フォーム)の星評価 */
+.feedback-star-row { display: flex; gap: 6px; }
+.feedback-star {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-size: 32px;
+  line-height: 1;
+  color: var(--line);
+  cursor: pointer;
+  padding: 2px;
+}
+.feedback-star.active { color: var(--gold-bright); text-shadow: 0 0 8px var(--pink-glow); }
+.feedback-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.feedback-list li { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.feedback-stars-text { color: var(--gold-bright); font-size: 14px; letter-spacing: 1px; }
+.feedback-name { font-size: 11.5px; color: var(--fg-faint); margin-left: 6px; }
+.feedback-date { font-size: 10.5px; color: var(--fg-faint); float: right; }
+.feedback-comment { font-size: 13px; color: var(--fg-dim); margin-top: 4px; white-space: pre-wrap; }
 
 .action-row { display: flex; gap: 8px; margin-top: 20px; }
 .action-row .btn { flex: 1; }
@@ -1053,8 +1077,10 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     db: null, ready: false, members: [], tab: "register", search: "", register: createEmptyRegister(),
     unlocked: false, staffCode: null, staffGranted: false, staffGateChecked: false,
     pendingEntryMemberId: null, publicJoinMode: false, publicJoinDone: false,
+    publicFeedbackMode: false,
     guestSales: [], guestSalesReady: false,
     visitLog: [], visitLogReady: false,
+    feedback: [], feedbackReady: false,
   };
 
   // ---- 会員の入店QRコード(スキャンで会計対象に自動セット) ----
@@ -1065,6 +1091,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
   (function captureEntryHashOnLoad() {
     const hash = (location.hash || "").replace(/^#/, "");
     if (hash === "join") { state.publicJoinMode = true; return; }
+    if (hash === "feedback") { state.publicFeedbackMode = true; return; }
     const m = /^m([a-zA-Z0-9_-]{4,})$/.exec(hash);
     if (m) state.pendingEntryMemberId = m[1];
   })();
@@ -1661,6 +1688,18 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
       return;
     }
 
+    if (state.publicFeedbackMode) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      $lockBtn.hidden = true;
+      $staffCodeBtn.hidden = true;
+      $pricingBtn.hidden = true;
+      $main.innerHTML = feedbackFormHtml();
+      bindFeedbackForm($main);
+      return;
+    }
+
     if (RESTRICTED_TABS.includes(state.tab) && !state.unlocked) {
       state.tab = "register";
     }
@@ -1816,6 +1855,9 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
         </label>
         <label class="field">電話番号 <span id="phoneRequiredMark" hidden>(紹介登録には必須)</span>
           <input type="tel" id="f-phone" name="phone" placeholder="例）090-1234-5678">
+        </label>
+        <label class="field">メールアドレス(任意・お得な情報をお届けすることがあります)
+          <input type="email" id="f-email" name="email" placeholder="例）example@mail.com">
         </label>
         <label class="field">住所
           <input type="text" id="f-address" name="address" placeholder="例）北海道網走市南3条1丁目">
@@ -2014,6 +2056,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
         const newMemberData = {
           name,
           phone,
+          email: (fd.get("email") || "").toString().trim(),
           address: (fd.get("address") || "").toString().trim(),
           birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
           birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,
@@ -2045,6 +2088,76 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
         showToast("登録に失敗しました。もう一度お試しください。");
         submitBtn.disabled = false;
         submitBtn.textContent = "この内容で登録する";
+      }
+    });
+  }
+
+  // ---------- お客様アンケート(ご意見・感想フォーム。#feedback で開く) ----------
+  // 店頭のQRコードから開く想定。会員かどうかに関わらず、誰でも匿名で送信できる。
+  // お名前欄は任意だが、入力された場合はオーナー専用アプリの「お客様の声」でのみ閲覧できる
+  // (他のお客様からは見えない)。
+  function feedbackFormHtml() {
+    return `
+      <p class="hint" style="margin:4px 0 14px;">ご来店ありがとうございます。今後のサービス向上のため、よろしければ感想をお聞かせください。</p>
+      <form class="stack" id="feedbackForm">
+        <div class="field">
+          <label style="display:block;margin-bottom:6px;">満足度 *</label>
+          <div class="feedback-star-row" id="feedbackStars">
+            ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="feedback-star" data-star="${n}" aria-label="${n}点">★</button>`).join("")}
+          </div>
+        </div>
+        <label class="field">ご意見・ご感想
+          <textarea id="f-comment" name="comment" rows="4" placeholder="良かった点、気になった点など、何でも教えてください"></textarea>
+        </label>
+        <label class="field">お名前(任意・オーナーのみ確認できます)
+          <input type="text" id="f-fbname" name="fbname" placeholder="よろしければお名前をどうぞ">
+        </label>
+        <button type="submit" class="btn btn-primary" style="width:100%;">送信する</button>
+      </form>
+    `;
+  }
+
+  function bindFeedbackForm(root) {
+    const $stars = root.querySelectorAll(".feedback-star");
+    let rating = 0;
+    function paintStars() {
+      $stars.forEach((btn) => { btn.classList.toggle("active", Number(btn.dataset.star) <= rating); });
+    }
+    $stars.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        rating = Number(btn.dataset.star);
+        paintStars();
+      });
+    });
+
+    const form = root.querySelector("#feedbackForm");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!rating) { showToast("星の数で満足度を選んでください"); return; }
+      if (!state.db) { showToast("通信環境をご確認のうえ、もう一度お試しください。"); return; }
+      const fd = new FormData(form);
+      const comment = (fd.get("comment") || "").toString().trim();
+      const fbname = (fd.get("fbname") || "").toString().trim();
+      const submitBtn = form.querySelector("button[type=submit]");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "送信中…";
+      try {
+        await state.db.collection("feedback").add({
+          rating,
+          comment,
+          name: fbname || null,
+          createdAt: new Date().toISOString(),
+        });
+        $main.innerHTML = `
+          <div class="empty">
+            <div class="glyph">🙏</div>
+            <p>ご意見ありがとうございました！</p>
+          </div>
+        `;
+      } catch (err) {
+        showToast("送信に失敗しました。もう一度お試しください。");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "送信する";
       }
     });
   }
@@ -2222,6 +2335,23 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     });
     return list.sort((a, b) => (b.daysSince == null ? 1 : b.daysSince) - (a.daysSince == null ? 1 : a.daysSince)).slice(0, 12);
   }
+  // 休眠会員向けの再来店案内メール(mailto:リンク)。文面はあらかじめ用意した
+  // 自然な案内文で、名前だけ差し込む。送信はスタッフがメールアプリ側で
+  // 内容を確認してから行う(このアプリから自動送信はしない)。
+  function reengageMailtoLink(m) {
+    if (!m.email) return null;
+    const subject = "【Barてきな？】最近お会いできず寂しいです";
+    const body = `${m.name || "お客様"}様
+
+いつもBarてきな？をご利用いただきありがとうございます。
+最近お見かけしておらず、少し寂しく思いご連絡いたしました。
+
+お忙しい日々かと思いますが、ダーツやゲームでちょっと息抜きしたくなったら、ぜひまた遊びにいらしてください。
+スタンプも引き続き貯まっていますので、またお会いできるのを楽しみにしています。
+
+Barてきな？ 一同`;
+    return `mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
   function referralLeaders() {
     return state.members
       .map((m) => ({ m, count: referredCountOf(m.id) }))
@@ -2350,11 +2480,41 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
 
       <div class="section-title">来店が途絶えているお客様(60日以上来店なし)</div>
       ${dormant.length ? `
-        <ul class="visit-log">
-          ${dormant.map((d) => `<li><span>${escapeHtml(d.m.name || "名前未設定")}</span><span class="amt">${d.daysSince == null ? "来店記録なし" : d.daysSince + "日前"}</span></li>`).join("")}
+        <ul class="visit-log dormant-list">
+          ${dormant.map((d) => {
+            const mailLink = reengageMailtoLink(d.m);
+            return `
+              <li class="dormant-item">
+                <span>${escapeHtml(d.m.name || "名前未設定")}</span>
+                <span class="amt">${d.daysSince == null ? "来店記録なし" : d.daysSince + "日前"}</span>
+                ${mailLink
+                  ? `<a class="btn btn-ghost dormant-mail-btn" href="${mailLink}">✉️ 案内メールを送る</a>`
+                  : `<span class="dormant-no-email">メール未登録</span>`}
+              </li>
+            `;
+          }).join("")}
         </ul>
-        <p class="hint">DMやクーポン配布など、再来店を促す施策の対象リストとして活用できます。</p>
+        <p class="hint">「案内メールを送る」を押すと、名前入りの案内文を入れた状態でメールアプリが開きます。内容を確認してから送信してください。メールアドレス未登録の方は、次回来店時に編集画面から追加できます。</p>
       ` : `<p class="hint">直近60日以内に来店していない会員はいません。</p>`}
+
+      <div class="section-title">お客様の声(アンケート・最新50件)</div>
+      ${state.feedback.length ? `
+        <ul class="feedback-list">
+          ${state.feedback.map((f) => {
+            const stars = "★".repeat(f.rating || 0) + "☆".repeat(5 - (f.rating || 0));
+            const dateStr = f.createdAt ? new Date(f.createdAt).toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }) : "";
+            return `
+              <li>
+                <span class="feedback-stars-text">${stars}</span>
+                ${f.name ? `<span class="feedback-name">${escapeHtml(f.name)}様</span>` : ""}
+                <span class="feedback-date">${dateStr}</span>
+                ${f.comment ? `<div class="feedback-comment">${escapeHtml(f.comment)}</div>` : ""}
+              </li>
+            `;
+          }).join("")}
+        </ul>
+        <p class="hint">店頭の「ご意見・感想」QRコードから、お客様が匿名で送信できます。</p>
+      ` : `<p class="hint">まだアンケートの投稿がありません。</p>`}
     `;
   }
 
@@ -3057,6 +3217,9 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
         <label class="field">電話番号
           <input type="tel" id="e-phone" name="phone" value="${escapeHtml(m.phone || "")}">
         </label>
+        <label class="field">メールアドレス(任意)
+          <input type="email" id="e-email" name="email" value="${escapeHtml(m.email || "")}">
+        </label>
         <label class="field">住所
           <input type="text" id="e-address" name="address" value="${escapeHtml(m.address || "")}">
         </label>
@@ -3147,6 +3310,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
       const payload = {
         name,
         phone,
+        email: (fd.get("email") || "").toString().trim(),
         address: (fd.get("address") || "").toString().trim(),
         birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
         birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,
@@ -3267,6 +3431,16 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     // 会員の来店記録は member.visits に直近15件のみ保存しているため、
     // 来店頻度が高い会員ほど古い記録が集計から漏れてしまう。
     // そのため全件を別コレクションにも記録し、売上・分析タブの集計はここから行う。
+    // お客様アンケート(#feedback で送信された、ご意見・感想・満足度)。
+    // 新しい順に最大50件まで、オーナー専用アプリの「お客様の声」に表示する。
+    state.db.collection("feedback").orderBy("createdAt", "desc").limit(50).onSnapshot(
+      (snap) => {
+        state.feedback = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.feedbackReady = true;
+        render();
+      },
+      () => { state.feedbackReady = true; render(); }
+    );
     state.db.collection("visitLog").onSnapshot(
       (snap) => {
         state.visitLog = snap.docs.map((d) => ({ id: d.id, ...d.data() }));

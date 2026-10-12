@@ -1859,6 +1859,12 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
         <label class="field">メールアドレス(任意・お得な情報をお届けすることがあります)
           <input type="email" id="f-email" name="email" placeholder="例）example@mail.com">
         </label>
+        <label class="field">LINE ID(任意)
+          <input type="text" id="f-line" name="line" placeholder="例）@tekina_bar">
+        </label>
+        <label class="field">Instagram(任意)
+          <input type="text" id="f-instagram" name="instagram" placeholder="例）@tekina_bar">
+        </label>
         <label class="field">住所
           <input type="text" id="f-address" name="address" placeholder="例）北海道網走市南3条1丁目">
         </label>
@@ -2057,6 +2063,8 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           name,
           phone,
           email: (fd.get("email") || "").toString().trim(),
+          line: (fd.get("line") || "").toString().trim(),
+          instagram: (fd.get("instagram") || "").toString().trim(),
           address: (fd.get("address") || "").toString().trim(),
           birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
           birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,
@@ -3220,6 +3228,12 @@ Barてきな？ 一同`;
         <label class="field">メールアドレス(任意)
           <input type="email" id="e-email" name="email" value="${escapeHtml(m.email || "")}">
         </label>
+        <label class="field">LINE ID(任意)
+          <input type="text" id="e-line" name="line" value="${escapeHtml(m.line || "")}">
+        </label>
+        <label class="field">Instagram(任意)
+          <input type="text" id="e-instagram" name="instagram" value="${escapeHtml(m.instagram || "")}">
+        </label>
         <label class="field">住所
           <input type="text" id="e-address" name="address" value="${escapeHtml(m.address || "")}">
         </label>
@@ -3311,6 +3325,8 @@ Barてきな？ 一同`;
         name,
         phone,
         email: (fd.get("email") || "").toString().trim(),
+        line: (fd.get("line") || "").toString().trim(),
+        instagram: (fd.get("instagram") || "").toString().trim(),
         address: (fd.get("address") || "").toString().trim(),
         birthYear: fd.get("birthYear") ? Number(fd.get("birthYear")) : null,
         birthMonth: fd.get("birthMonth") ? Number(fd.get("birthMonth")) : null,

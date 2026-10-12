@@ -50,6 +50,14 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // スタッフ一覧(在籍記録。オーナー専用コード画面から追加・削除): 匿名ログイン
+    // 済みなら読み書き可。アクセスコード自体(settings/staffAccess)とは別物で、
+    // あくまで「誰が在籍しているかの記録」であり、削除してもアクセス権は自動では
+    // 止まらない(アクセスを止めるにはコードの再発行が必要)。
+    match /staff/{staffId} {
+      allow read, write: if request.auth != null;
+    }
+
     // 設定(スタッフコード・オーナーPIN・料金設定): こちらも匿名ログイン済みなら読み書き可。
     // アプリ側では、この中の値(staffAccess.code / app.ownerPin)と、
     // ユーザーが入力した値をクライアントJSで突き合わせてゲートしているだけであり、

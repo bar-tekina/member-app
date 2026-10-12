@@ -2391,8 +2391,34 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
       `;
     }
 
-    // 飲み放題(コース)画面: 人数と延長のみ。ドリンク・ダーツ・ゲーム・カラオケは
-    // コース料金に含まれているため、ここでは個別入力させない(二重請求の誤操作防止)。
+    // 追加メニューのグリッドHTMLを作る共通関数(飲み放題画面・単品画面の両方で使う)
+    function menuItemGridHtml(items) {
+      return `
+        <div class="reg-menu-grid">
+          ${items.map((it) => {
+            const n = reg.menu[it.key] || 0;
+            return `
+              <div class="reg-menu-item">
+                <div class="reg-menu-label"><span>${it.label}</span><span class="reg-menu-price">¥${it.price}</span></div>
+                <div class="reg-stepper reg-stepper-sm">
+                  <button type="button" class="reg-step-btn" data-menu-minus="${it.key}" ${n <= 0 ? "disabled" : ""}>−</button>
+                  <div class="reg-step-val"><span class="num">${n}</span></div>
+                  <button type="button" class="reg-step-btn" data-menu-plus="${it.key}">＋</button>
+                </div>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      `;
+    }
+    // 飲み放題のコース料金に含まれるのは「アルコール」「ソフトドリンク」の定番ドリンクのみ。
+    // シャンパン・テキーラ・オリシャンなどの追加メニュー項目や、かき氷・ソフトクリームといった
+    // フード類はコースに含まれない追加注文のため、飲み放題画面にも表示する。
+    const COURSE_INCLUDED_MENU_KEYS = ["alcohol", "softdrink"];
+    const courseExtraMenuItems = MENU_ITEMS.filter((it) => !COURSE_INCLUDED_MENU_KEYS.includes(it.key));
+
+    // 飲み放題(コース)画面: 人数・延長に加え、コースに含まれない追加注文(フード・プレミアム
+    // ドリンク等)も入力できる。定番のアルコール・ソフトドリンクは元々含まれているため除外。
     const coursePanelHtml = `
       <div class="reg-swipe-page" data-reg-page="course">
         <div class="section-title">飲み放題(90分) 人数</div>
@@ -2411,7 +2437,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
             `;
           }).join("")}
         </div>
-        <p class="hint">ドリンク・アルコール・ダーツ・ゲーム・カラオケはコース料金に含まれているため、入力不要です。</p>
+        <p class="hint">定番のアルコール・ソフトドリンク、ダーツ・ゲーム・カラオケはコース料金に含まれているため、入力不要です。</p>
 
         <div class="section-title">延長(1時間 ¥${EXTENSION_PRICE.toLocaleString()})</div>
         <div class="reg-stepper">
@@ -2420,6 +2446,11 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
           <button type="button" class="reg-step-btn" id="extPlus">＋</button>
           <div class="reg-step-sub num">¥${(reg.extensions * EXTENSION_PRICE).toLocaleString()}</div>
         </div>
+
+        ${courseExtraMenuItems.length ? `
+          <div class="section-title">追加オーダー(コースに含まれないもの)</div>
+          ${menuItemGridHtml(courseExtraMenuItems)}
+        ` : ""}
       </div>
     `;
 
@@ -2443,21 +2474,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
         </div>
 
         <div class="section-title">追加メニュー</div>
-        <div class="reg-menu-grid">
-          ${MENU_ITEMS.map((it) => {
-            const n = reg.menu[it.key] || 0;
-            return `
-              <div class="reg-menu-item">
-                <div class="reg-menu-label"><span>${it.label}</span><span class="reg-menu-price">¥${it.price}</span></div>
-                <div class="reg-stepper reg-stepper-sm">
-                  <button type="button" class="reg-step-btn" data-menu-minus="${it.key}" ${n <= 0 ? "disabled" : ""}>−</button>
-                  <div class="reg-step-val"><span class="num">${n}</span></div>
-                  <button type="button" class="reg-step-btn" data-menu-plus="${it.key}">＋</button>
-                </div>
-              </div>
-            `;
-          }).join("")}
-        </div>
+        ${menuItemGridHtml(MENU_ITEMS)}
       </div>
     `;
 

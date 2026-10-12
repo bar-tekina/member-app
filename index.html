@@ -831,6 +831,39 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
 .feedback-date { font-size: 10.5px; color: var(--fg-faint); float: right; }
 .feedback-comment { font-size: 13px; color: var(--fg-dim); margin-top: 4px; white-space: pre-wrap; }
 
+/* 予約カレンダー */
+.cal-card { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.cal-nav-btn {
+  appearance: none; border: 1px solid var(--line); background: var(--bg-elev-2); color: var(--fg);
+  width: 32px; height: 32px; border-radius: 8px; font-size: 16px; cursor: pointer;
+}
+.cal-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.cal-month-label { font-weight: 600; font-size: 14px; }
+.cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 11px; color: var(--fg-faint); margin-bottom: 4px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-cell {
+  position: relative; appearance: none; border: 1px solid transparent; background: var(--bg-elev-2); color: var(--fg);
+  aspect-ratio: 1; min-width: 0; border-radius: 8px; font-size: 13px; font-family: var(--tnum); cursor: pointer;
+}
+.cal-cell.cal-empty { background: transparent; border: none; cursor: default; }
+.cal-cell.disabled { opacity: 0.3; cursor: default; }
+.cal-cell.today { border-color: var(--pink); }
+.cal-cell.selected { background: var(--pink); color: #fff; }
+.cal-dot { position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%); width: 5px; height: 5px; border-radius: 50%; background: var(--gold-bright); }
+.cal-cell.selected .cal-dot { background: #fff; }
+
+.reservation-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.reservation-list .reservation-item { background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.res-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.res-time { font-family: var(--tnum); font-weight: 600; font-size: 13px; }
+.res-badge { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--fg-dim); }
+.res-badge-pending { color: var(--gold-bright); border-color: var(--gold-bright); }
+.res-badge-confirmed { color: var(--pink-bright); border-color: var(--pink-bright); }
+.res-badge-cancelled { color: var(--fg-faint); text-decoration: line-through; }
+.res-name { font-size: 13.5px; }
+.reservation-item .action-row { margin-top: 8px; }
+
 .action-row { display: flex; gap: 8px; margin-top: 20px; }
 .action-row .btn { flex: 1; }
 
@@ -991,6 +1024,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       <button data-tab="new">新規登録</button>
       <button data-tab="birthday">誕生日</button>
       <button data-tab="dormant">休眠会員</button>
+      <button data-tab="reservations">予約</button>
       <button data-tab="sales">売上</button>
       <button data-tab="analysis">分析</button>
     </nav>
@@ -1079,9 +1113,11 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     unlocked: false, staffCode: null, staffGranted: false, staffGateChecked: false,
     pendingEntryMemberId: null, publicJoinMode: false, publicJoinDone: false,
     publicFeedbackMode: false,
+    publicReserveMode: false, reserveFormMonth: null, reserveFormDate: null,
     guestSales: [], guestSalesReady: false,
     visitLog: [], visitLogReady: false,
     feedback: [], feedbackReady: false,
+    reservations: [], reservationsReady: false, resTabMonth: null, resTabDate: null,
   };
 
   // ---- 会員の入店QRコード(スキャンで会計対象に自動セット) ----
@@ -1093,6 +1129,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     const hash = (location.hash || "").replace(/^#/, "");
     if (hash === "join") { state.publicJoinMode = true; return; }
     if (hash === "feedback") { state.publicFeedbackMode = true; return; }
+    if (hash === "reserve") { state.publicReserveMode = true; return; }
     const m = /^m([a-zA-Z0-9_-]{4,})$/.exec(hash);
     if (m) state.pendingEntryMemberId = m[1];
   })();
@@ -1701,6 +1738,18 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       return;
     }
 
+    if (state.publicReserveMode) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      $lockBtn.hidden = true;
+      $staffCodeBtn.hidden = true;
+      $pricingBtn.hidden = true;
+      $main.innerHTML = reservationFormHtml();
+      bindReservationForm($main);
+      return;
+    }
+
     if (RESTRICTED_TABS.includes(state.tab) && !state.unlocked) {
       state.tab = "register";
     }
@@ -1738,6 +1787,12 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
 
     if (state.tab === "dormant") {
       $main.innerHTML = dormantTabHtml();
+      return;
+    }
+
+    if (state.tab === "reservations") {
+      $main.innerHTML = reservationsTabHtml();
+      bindReservationsTab($main);
       return;
     }
 
@@ -2549,6 +2604,227 @@ Barてきな？ 一同`;
         <p class="hint">店頭の「ご意見・感想」QRコードから、お客様が匿名で送信できます。</p>
       ` : `<p class="hint">まだアンケートの投稿がありません。</p>`}
     `;
+  }
+
+  // ---------- 予約カレンダー ----------
+  // お客様は #reserve の公開フォームから「日付・時間・人数」を送信して予約依頼ができる。
+  // 誰でも予約可能(会員登録不要・名前と電話番号のみ)。送信直後は status:"pending"
+  // (仮予約)で、スタッフ・オーナーどちらでも「予約」タブで内容を確認してから
+  // 「承認する」を押すと status:"confirmed"(予約確定)になる。予約数の上限は設けていない。
+  function pad2(n) { return String(n).padStart(2, "0"); }
+  function todayDateStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+  function currentMonthStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  }
+  function addMonths(monthStr, delta) {
+    const [y, m] = monthStr.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  }
+  function calMonthLabel(monthStr) {
+    const [y, m] = monthStr.split("-").map(Number);
+    return `${y}年${m}月`;
+  }
+  function formatDateJp(dateStr) {
+    if (!dateStr) return "";
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const wd = WEEKDAY_LABELS[new Date(y, m - 1, d).getDay()];
+    return `${y}年${m}月${d}日(${wd})`;
+  }
+  // カレンダーのマス目を作る。月初の曜日分だけ先頭を空セルにして、7の倍数になるまで末尾も空セルで埋める。
+  function buildMonthGrid(monthStr) {
+    const [y, m] = monthStr.split("-").map(Number);
+    const firstWeekday = new Date(y, m - 1, 1).getDay();
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < firstWeekday; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push({ dateStr: `${y}-${pad2(m)}-${pad2(d)}`, day: d });
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }
+  function reservationStatusLabel(status) {
+    if (status === "confirmed") return "予約確定";
+    if (status === "cancelled") return "キャンセル";
+    return "確認待ち";
+  }
+
+  // ---- お客様向け予約フォーム(#reserve で公開) ----
+  function reservationFormHtml() {
+    if (!state.reserveFormMonth) state.reserveFormMonth = currentMonthStr();
+    const todayStr = todayDateStr();
+    const cells = buildMonthGrid(state.reserveFormMonth);
+    return `
+      <p class="hint" style="margin:4px 0 14px;">ご来店のご予約はこちらから。カレンダーから日付を選び、時間・人数などを入力して送信してください。</p>
+      <div class="cal-card">
+        <div class="cal-nav">
+          <button type="button" class="cal-nav-btn" id="calPrevMonth" ${state.reserveFormMonth <= currentMonthStr() ? "disabled" : ""}>‹</button>
+          <div class="cal-month-label">${escapeHtml(calMonthLabel(state.reserveFormMonth))}</div>
+          <button type="button" class="cal-nav-btn" id="calNextMonth">›</button>
+        </div>
+        <div class="cal-weekdays">${WEEKDAY_LABELS.map((w) => `<div>${w}</div>`).join("")}</div>
+        <div class="cal-grid">
+          ${cells.map((c) => {
+            if (!c) return `<div class="cal-cell cal-empty"></div>`;
+            const isPast = c.dateStr < todayStr;
+            const isSelected = c.dateStr === state.reserveFormDate;
+            return `<button type="button" class="cal-cell${isSelected ? " selected" : ""}${isPast ? " disabled" : ""}" data-date="${c.dateStr}" ${isPast ? "disabled" : ""}>${c.day}</button>`;
+          }).join("")}
+        </div>
+      </div>
+      <form class="stack" id="reservationForm" style="margin-top:16px;">
+        <p class="hint">${state.reserveFormDate ? `選択中の日付: ${escapeHtml(formatDateJp(state.reserveFormDate))}` : "まずカレンダーから来店日を選んでください"}</p>
+        <label class="field">ご来店時間 *
+          <input type="time" id="r-time" name="time" required>
+        </label>
+        <label class="field">人数 *
+          <input type="number" id="r-party" name="partySize" min="1" value="2" required>
+        </label>
+        <label class="field">お名前 *
+          <input type="text" id="r-name" name="name" required>
+        </label>
+        <label class="field">電話番号 *
+          <input type="tel" id="r-phone" name="phone" required>
+        </label>
+        <label class="field">ご要望など(任意)
+          <textarea id="r-memo" name="memo" rows="2" placeholder="お祝い、苦手な飲み物など"></textarea>
+        </label>
+        <button type="submit" class="btn btn-primary" style="width:100%;">予約を送信する</button>
+        <p class="hint">送信後、店舗で内容を確認してから確定のご連絡をいたします。確定まで少しお時間をいただく場合があります。</p>
+      </form>
+    `;
+  }
+
+  function bindReservationForm(root) {
+    const $prev = root.querySelector("#calPrevMonth");
+    const $next = root.querySelector("#calNextMonth");
+    if ($prev) $prev.addEventListener("click", () => { state.reserveFormMonth = addMonths(state.reserveFormMonth, -1); render(); });
+    if ($next) $next.addEventListener("click", () => { state.reserveFormMonth = addMonths(state.reserveFormMonth, 1); render(); });
+    root.querySelectorAll(".cal-cell[data-date]").forEach((btn) => {
+      btn.addEventListener("click", () => { state.reserveFormDate = btn.dataset.date; render(); });
+    });
+
+    const form = root.querySelector("#reservationForm");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!state.reserveFormDate) { showToast("来店日をカレンダーから選んでください"); return; }
+      if (!state.db) { showToast("通信環境をご確認のうえ、もう一度お試しください。"); return; }
+      const fd = new FormData(form);
+      const time = (fd.get("time") || "").toString();
+      const partySize = Number(fd.get("partySize")) || 1;
+      const name = (fd.get("name") || "").toString().trim();
+      const phone = (fd.get("phone") || "").toString().trim();
+      const memo = (fd.get("memo") || "").toString().trim();
+      if (!name || !phone) { showToast("お名前と電話番号を入力してください"); return; }
+      const submitBtn = form.querySelector("button[type=submit]");
+      submitBtn.disabled = true;
+      submitBtn.textContent = "送信中…";
+      try {
+        await state.db.collection("reservations").add({
+          date: state.reserveFormDate,
+          time,
+          partySize,
+          name,
+          phone,
+          memo,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        });
+        $main.innerHTML = `
+          <div class="empty">
+            <div class="glyph">📅</div>
+            <p>ご予約を受け付けました！<br>店舗からの確定のご連絡をお待ちください。</p>
+          </div>
+        `;
+      } catch (err) {
+        showToast("送信に失敗しました。もう一度お試しください。");
+        submitBtn.disabled = false;
+        submitBtn.textContent = "予約を送信する";
+      }
+    });
+  }
+
+  // ---- スタッフ・オーナー向け「予約」タブ ----
+  function reservationsTabHtml() {
+    if (!state.reservationsReady) {
+      return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+    }
+    if (!state.resTabMonth) state.resTabMonth = currentMonthStr();
+    if (!state.resTabDate) state.resTabDate = todayDateStr();
+    const cells = buildMonthGrid(state.resTabMonth);
+    const countByDate = {};
+    state.reservations.forEach((r) => {
+      if (r.status !== "cancelled") countByDate[r.date] = (countByDate[r.date] || 0) + 1;
+    });
+    const todayStr = todayDateStr();
+    const dayList = state.reservations
+      .filter((r) => r.date === state.resTabDate)
+      .sort((a, b) => (a.time || "").localeCompare(b.time || ""));
+
+    return `
+      <div class="cal-card">
+        <div class="cal-nav">
+          <button type="button" class="cal-nav-btn" id="calPrevMonth">‹</button>
+          <div class="cal-month-label">${escapeHtml(calMonthLabel(state.resTabMonth))}</div>
+          <button type="button" class="cal-nav-btn" id="calNextMonth">›</button>
+        </div>
+        <div class="cal-weekdays">${WEEKDAY_LABELS.map((w) => `<div>${w}</div>`).join("")}</div>
+        <div class="cal-grid">
+          ${cells.map((c) => {
+            if (!c) return `<div class="cal-cell cal-empty"></div>`;
+            const isSelected = c.dateStr === state.resTabDate;
+            const isToday = c.dateStr === todayStr;
+            const count = countByDate[c.dateStr];
+            return `<button type="button" class="cal-cell${isSelected ? " selected" : ""}${isToday ? " today" : ""}" data-date="${c.dateStr}">${c.day}${count ? `<span class="cal-dot"></span>` : ""}</button>`;
+          }).join("")}
+        </div>
+      </div>
+      <div class="section-title">${escapeHtml(formatDateJp(state.resTabDate))}の予約(${dayList.length}件)</div>
+      ${dayList.length ? `
+        <ul class="reservation-list">
+          ${dayList.map((r) => `
+            <li class="reservation-item">
+              <div class="res-top">
+                <span class="res-time">${escapeHtml(r.time || "時間未定")}〜</span>
+                <span class="res-badge res-badge-${escapeHtml(r.status)}">${escapeHtml(reservationStatusLabel(r.status))}</span>
+              </div>
+              <div class="res-name">${escapeHtml(r.name || "名前未設定")}様・${escapeHtml(String(r.partySize || "?"))}名</div>
+              <div class="hint">${escapeHtml(r.phone || "")}</div>
+              ${r.memo ? `<div class="hint">${escapeHtml(r.memo)}</div>` : ""}
+              <div class="action-row">
+                ${r.status === "pending" ? `<button type="button" class="btn btn-primary" data-res-confirm="${r.id}">承認する</button>` : ""}
+                ${r.status !== "cancelled" ? `<button type="button" class="btn btn-danger" data-res-cancel="${r.id}">キャンセル</button>` : ""}
+              </div>
+            </li>
+          `).join("")}
+        </ul>
+      ` : `<p class="hint">この日の予約はありません。</p>`}
+    `;
+  }
+
+  function bindReservationsTab(root) {
+    const $prev = root.querySelector("#calPrevMonth");
+    const $next = root.querySelector("#calNextMonth");
+    if ($prev) $prev.addEventListener("click", () => { state.resTabMonth = addMonths(state.resTabMonth, -1); render(); });
+    if ($next) $next.addEventListener("click", () => { state.resTabMonth = addMonths(state.resTabMonth, 1); render(); });
+    root.querySelectorAll(".cal-cell[data-date]").forEach((btn) => {
+      btn.addEventListener("click", () => { state.resTabDate = btn.dataset.date; render(); });
+    });
+    root.querySelectorAll("[data-res-confirm]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await state.db.collection("reservations").doc(btn.dataset.resConfirm).update({ status: "confirmed" });
+        showToast("予約を確定しました");
+      });
+    });
+    root.querySelectorAll("[data-res-cancel]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await state.db.collection("reservations").doc(btn.dataset.resCancel).update({ status: "cancelled" });
+        showToast("予約をキャンセルにしました");
+      });
+    });
   }
 
   // ---------- register (会計) ----------
@@ -3527,6 +3803,17 @@ Barてきな？ 一同`;
         render();
       },
       () => { state.feedbackReady = true; render(); }
+    );
+    // 予約(#reserve の公開フォームから送信されたもの)。orderByを付けず全件を
+    // 購読し、カレンダー表示側で日付ごとに絞り込む(予約数が多くなりすぎない
+    // 小規模店舗の運用を想定)。
+    state.db.collection("reservations").onSnapshot(
+      (snap) => {
+        state.reservations = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.reservationsReady = true;
+        render();
+      },
+      () => { state.reservationsReady = true; render(); }
     );
     state.db.collection("visitLog").onSnapshot(
       (snap) => {

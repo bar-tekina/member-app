@@ -43,6 +43,13 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // 予約(#reserve の公開フォームから送信): 匿名ログイン済みなら(=アプリを
+    // 一度でも開いた人なら)投稿・閲覧・更新可。スタッフ/オーナーが「予約」
+    // タブから承認・キャンセルする際も同じ仕組みで更新する。
+    match /reservations/{reservationId} {
+      allow read, write: if request.auth != null;
+    }
+
     // 設定(スタッフコード・オーナーPIN・料金設定): こちらも匿名ログイン済みなら読み書き可。
     // アプリ側では、この中の値(staffAccess.code / app.ownerPin)と、
     // ユーザーが入力した値をクライアントJSで突き合わせてゲートしているだけであり、

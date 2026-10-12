@@ -1674,7 +1674,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           openStaffCodeSheet();
         }
       } catch (err) {
-        showToast("保存に失敗しました");
+        showToast("保存に失敗しました" + (err && err.message ? "(" + err.message + ")" : ""));
         submitBtn.disabled = false;
       }
     });
@@ -2371,7 +2371,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           render();
         }
       } catch (err) {
-        showToast("登録に失敗しました。もう一度お試しください。");
+        showToast("登録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
         submitBtn.disabled = false;
         submitBtn.textContent = "この内容で登録する";
       }
@@ -3548,21 +3548,38 @@ Barてきな？ 一同`;
   // ---------- 本人確認書類(免許証・学生証・保険証など)の画像を圧縮して保存用に変換 ----------
   const ID_DOC_TYPE_LABELS = { license: "運転免許証", student: "学生証", insurance: "保険証", other: "その他の書類" };
   function idDocTypeLabel(type) { return ID_DOC_TYPE_LABELS[type] || "本人確認書類"; }
+  // Firestoreは1ドキュメントあたり1MiBまでという上限があり、本人確認書類の
+  // 写真1枚でそれを超えると保存自体が失敗する(「保存に失敗しました」)。
+  // 背景が写り込んだ写真(机の上に置いて撮影など)は同じ解像度でも容量が
+  // 大きくなりやすいため、1回の圧縮で収まらない場合は画質・解像度を
+  // 段階的に落として、安全なサイズに収まるまで再圧縮する。
+  const ID_IMAGE_MAX_DATAURL_LEN = 650000; // 約650KB相当。他のフィールド分の余裕を残す
   function compressImageFile(file, maxDim, quality, callback) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(img.width * scale));
-        canvas.height = Math.max(1, Math.round(img.height * scale));
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        let dataUrl = null;
-        try { dataUrl = canvas.toDataURL("image/jpeg", quality); } catch (err) { dataUrl = null; }
+        function render(dim, q) {
+          const scale = Math.min(1, dim / Math.max(img.width, img.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          try { return canvas.toDataURL("image/jpeg", q); } catch (err) { return null; }
+        }
+        let dim = maxDim;
+        let q = quality;
+        let dataUrl = render(dim, q);
+        let attempts = 0;
+        while (dataUrl && dataUrl.length > ID_IMAGE_MAX_DATAURL_LEN && attempts < 6) {
+          q = Math.max(0.3, q - 0.12);
+          dim = Math.max(450, Math.round(dim * 0.82));
+          dataUrl = render(dim, q);
+          attempts++;
+        }
         callback(dataUrl);
       };
       img.onerror = () => callback(null);

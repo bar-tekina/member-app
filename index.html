@@ -723,6 +723,38 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; 
 }
 .reg-toggle-price { font-family: var(--tnum); color: var(--gold-bright); font-size: 13px; }
 
+/* 飲み放題/単品の切り替え(タブ+横スワイプ) */
+.reg-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+.reg-tab-btn {
+  flex: 1;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  border-radius: 10px;
+  padding: 11px 8px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+.reg-tab-btn.active {
+  background: linear-gradient(135deg, rgba(236,58,168,0.22), rgba(232,180,58,0.1));
+  border-color: var(--pink);
+  color: var(--fg);
+  box-shadow: 0 0 0 1px var(--pink) inset;
+}
+.reg-swipe-wrap {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.reg-swipe-wrap::-webkit-scrollbar { display: none; }
+.reg-swipe-page { flex: 0 0 100%; min-width: 0; scroll-snap-align: start; }
+
 .reg-stepper { display: flex; align-items: center; gap: 12px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
 .reg-stepper-sm { padding: 5px 8px; gap: 8px; background: transparent; border: none; }
 .reg-step-btn {
@@ -1013,6 +1045,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     return {
       course: { male: 0, female: 0 }, tanpinCount: 0,
       extensions: 0, menu: {}, customItems: [], memberId: null, memberLabel: "", guest: false, memberQuery: "",
+      registerView: "course", // "course"(飲み放題) | "tanpin"(単品) — 会計画面でどちらをスワイプ表示中か
     };
   }
 
@@ -2358,8 +2391,10 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
       `;
     }
 
-    return `
-      <div class="reg-wrap">
+    // 飲み放題(コース)画面: 人数と延長のみ。ドリンク・ダーツ・ゲーム・カラオケは
+    // コース料金に含まれているため、ここでは個別入力させない(二重請求の誤操作防止)。
+    const coursePanelHtml = `
+      <div class="reg-swipe-page" data-reg-page="course">
         <div class="section-title">飲み放題(90分) 人数</div>
         <div class="reg-menu-grid">
           ${COURSES.map((c) => {
@@ -2376,6 +2411,7 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
             `;
           }).join("")}
         </div>
+        <p class="hint">ドリンク・アルコール・ダーツ・ゲーム・カラオケはコース料金に含まれているため、入力不要です。</p>
 
         <div class="section-title">延長(1時間 ¥${EXTENSION_PRICE.toLocaleString()})</div>
         <div class="reg-stepper">
@@ -2384,7 +2420,12 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
           <button type="button" class="reg-step-btn" id="extPlus">＋</button>
           <div class="reg-step-sub num">¥${(reg.extensions * EXTENSION_PRICE).toLocaleString()}</div>
         </div>
+      </div>
+    `;
 
+    // 単品(なんでもバラ売り)画面: チャージ料・ゲーム・ドリンク等の追加メニューをここで入力。
+    const tanpinPanelHtml = `
+      <div class="reg-swipe-page" data-reg-page="tanpin">
         <div class="section-title">単品 人数(チャージ料 ¥${TANPIN_CHARGE.toLocaleString()}/人)</div>
         <div class="reg-stepper">
           <button type="button" class="reg-step-btn" id="tanpinMinus" ${reg.tanpinCount <= 0 ? "disabled" : ""}>−</button>
@@ -2416,6 +2457,19 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
               </div>
             `;
           }).join("")}
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="reg-wrap">
+        <div class="reg-tabs">
+          <button type="button" class="reg-tab-btn ${reg.registerView === "tanpin" ? "" : "active"}" data-reg-tab="course">🍹 飲み放題</button>
+          <button type="button" class="reg-tab-btn ${reg.registerView === "tanpin" ? "active" : ""}" data-reg-tab="tanpin">🍺 単品</button>
+        </div>
+        <div class="reg-swipe-wrap" id="regSwipeWrap">
+          ${coursePanelHtml}
+          ${tanpinPanelHtml}
         </div>
 
         <div class="section-title">その他(手入力)</div>
@@ -2454,6 +2508,41 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
 
   function bindRegisterTab(root) {
     const reg = state.register;
+
+    // ---- 飲み放題/単品の切り替え(タブタップ + 横スワイプ両対応) ----
+    const $swipeWrap = root.querySelector("#regSwipeWrap");
+    const $tabBtns = root.querySelectorAll("[data-reg-tab]");
+    function setActiveTabClass(view) {
+      $tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.regTab === view));
+    }
+    if ($swipeWrap) {
+      // render()のたびにDOMが作り直されscrollLeftが0に戻ってしまうため、
+      // 直前にどちらの画面を見ていたか(reg.registerView)に合わせて
+      // アニメーションなしで即座にスクロール位置を復元する。
+      $swipeWrap.scrollLeft = reg.registerView === "tanpin" ? $swipeWrap.clientWidth : 0;
+
+      $tabBtns.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const view = btn.dataset.regTab;
+          reg.registerView = view;
+          setActiveTabClass(view);
+          $swipeWrap.scrollTo({ left: view === "tanpin" ? $swipeWrap.clientWidth : 0, behavior: "smooth" });
+        });
+      });
+
+      // 指でスワイプして切り替えた場合も、次のrender()で同じ画面を保てるよう
+      // 現在表示中のページをreg.registerViewに反映しておく(軽いデバウンス付き)。
+      let scrollSettleTimer = null;
+      $swipeWrap.addEventListener("scroll", () => {
+        if (scrollSettleTimer) clearTimeout(scrollSettleTimer);
+        scrollSettleTimer = setTimeout(() => {
+          const idx = Math.round($swipeWrap.scrollLeft / Math.max(1, $swipeWrap.clientWidth));
+          const view = idx > 0 ? "tanpin" : "course";
+          reg.registerView = view;
+          setActiveTabClass(view);
+        }, 120);
+      });
+    }
 
     root.querySelectorAll("[data-course-plus]").forEach((btn) => {
       btn.addEventListener("click", () => {

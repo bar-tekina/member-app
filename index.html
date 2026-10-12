@@ -2162,7 +2162,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           <textarea id="f-memo" name="memo" rows="2" placeholder="好きなお酒、席の好みなど"></textarea>
         </label>
 
-        <label class="field">本人確認書類 *(免許証・学生証・保険証など)
+        <label class="field">本人確認書類(任意・免許証/学生証/保険証など。後から追加もできます)
           <select id="f-id-type">
             <option value="">書類の種類を選択</option>
             <option value="license">運転免許証</option>
@@ -2179,7 +2179,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           <button type="button" class="btn btn-ghost" id="f-id-capture" style="flex:1;">📷 書類を撮影する</button>
           <button type="button" class="btn btn-ghost" id="f-id-clear" hidden style="flex:none;">削除</button>
         </div>
-        <p class="hint">なりすまし・年齢詐称を防ぐため、全会員に本人確認書類の撮影が必要です。画像はこのアプリ内にのみ保存されます。</p>
+        <p class="hint">今その場で撮影できなくても登録できます。後日、会員一覧の編集画面からいつでも追加・差し替えができます。画像はこのアプリ内にのみ保存されます。</p>
 
         <label class="field">紹介者(任意)
           <div class="referrer-picker">
@@ -2305,11 +2305,10 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
         showToast("紹介登録には電話番号の入力が必要です");
         return;
       }
-      // ---- なりすまし・年齢詐称防止: 本人確認書類の撮影を必須にする ----
-      if (!idDocDraft) {
-        showToast("本人確認書類(免許証・学生証・保険証など)の撮影が必要です");
-        return;
-      }
+      // 本人確認書類はその場で撮影できないこともあるため任意とし、未添付でも
+      // 登録できるようにしている(なりすまし・年齢詐称対策は、未添付の会員が
+      // 会員一覧に「⚠️書類未登録」バッジで表示される運用でカバーし、後から
+      // 編集画面で追加・差し替えできる)。
 
       let referredBy = null;
       if (referrerId) {

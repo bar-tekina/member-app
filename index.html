@@ -1157,6 +1157,16 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
     return false;
   }
 
+  // ---- トラブル調査用: 現在の認証状態を短い文字列にする ----
+  // 「保存に失敗しました」が繰り返される端末で、原因が(a)本当に未認証なのか
+  // (b)認証はできているのにルールで弾かれているのか、を画面上の文言だけで
+  // 区別できるようにする。
+  function authDebugInfo() {
+    const u = firebase.auth().currentUser;
+    if (!u) return "未ログイン";
+    return "uid:" + u.uid.slice(0, 6) + (state.authReady ? "" : "/未確認");
+  }
+
   // ---- 認証とFirestore側の反映に一瞬ズレがある端末向けのリトライ ----
   // ensureAnonymousAuth() が true を返していても、ごく稀に直後の書き込みが
   // "Missing or insufficient permissions" で一度だけ失敗することがある端末が
@@ -1738,7 +1748,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           openStaffCodeSheet();
         }
       } catch (err) {
-        showToast("保存に失敗しました" + (err && err.message ? "(" + err.message + ")" : ""));
+        showToast("保存に失敗しました" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
         submitBtn.disabled = false;
       }
     });
@@ -2442,7 +2452,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           render();
         }
       } catch (err) {
-        showToast("登録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
+        showToast("登録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
         submitBtn.disabled = false;
         submitBtn.textContent = "この内容で登録する";
       }
@@ -2519,7 +2529,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           </div>
         `;
       } catch (err) {
-        showToast("送信に失敗しました。もう一度お試しください。");
+        showToast("送信に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
         submitBtn.disabled = false;
         submitBtn.textContent = "送信する";
       }
@@ -3042,7 +3052,7 @@ Barてきな？ 一同`;
           </div>
         `;
       } catch (err) {
-        showToast("送信に失敗しました。もう一度お試しください。");
+        showToast("送信に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
         submitBtn.disabled = false;
         submitBtn.textContent = "予約を送信する";
       }

@@ -2926,6 +2926,12 @@ Barてきな？ 一同`;
     const age = ageOf(m);
     const visits = (m.visits || []).slice().reverse();
     const dialId = "d" + m.id.replace(/[^a-zA-Z0-9]/g, "");
+    // 直前の「＋来店」操作を誤って押してしまった場合の取り消し用。
+    // 特典利用の記録(note:"特典利用")はスタンプの消費処理であり来店回数には
+    // 影響していないため、取り消しボタンの対象外とする。
+    const rawVisits = m.visits || [];
+    const lastVisitEntry = rawVisits.length ? rawVisits[rawVisits.length - 1] : null;
+    const canUndoVisit = !!(lastVisitEntry && lastVisitEntry.note !== "特典利用");
 
     const html = `
       <div class="sheet-header">
@@ -2972,6 +2978,7 @@ Barてきな？ 一同`;
         <input type="number" id="f-visit-amount" name="amount" placeholder="利用金額(円・任意)" min="0">
         <button type="submit" class="btn btn-primary" style="flex:none;">＋来店</button>
       </form>
+      ${canUndoVisit ? `<button type="button" class="btn btn-ghost" id="undoVisitBtn" style="width:100%;margin-top:6px;">↩️ 直前の来店(${escapeHtml(lastVisitEntry.date)})を取り消す</button>` : ""}
       ${readyForReward ? `<button class="btn btn-ghost" id="redeemBtn" style="width:100%;margin-top:4px;">特典を利用済みにする</button>` : ""}
 
       <div class="section-title">連絡先・メモ</div>
@@ -3029,6 +3036,15 @@ Barてきな？ 一同`;
         await redeemReward(m);
         closeSheet();
         showToast("特典利用として記録しました");
+      });
+    }
+
+    const undoVisitBtn = document.getElementById("undoVisitBtn");
+    if (undoVisitBtn) {
+      undoVisitBtn.addEventListener("click", async () => {
+        await undoLastVisit(m);
+        closeSheet();
+        showToast("直前の来店記録を取り消しました");
       });
     }
 
@@ -3191,6 +3207,36 @@ Barてきな？ 一同`;
         await grantReferralBonus(m);
       } catch (err) { /* 紹介ボーナスの付与に失敗しても、会計自体は既に成功している */ }
     }
+  }
+
+  // 「＋来店」を誤って押してしまった場合に、直前の来店記録1件を取り消す。
+  // recordVisit() で加算した visitCount・totalSpend・points・totalPointsEarned を
+  // 同じ分だけ減算し、visits配列から最後の1件を削除する。
+  // 集計用の visitLog コレクションにも同じタイミングで記録を追加しているため、
+  // そのメンバーの最新の visitLog も合わせて削除する(失敗しても会員データ側の
+  // 取り消しは既に完了しているので、分析集計が多少ズレる程度で済む)。
+  async function undoLastVisit(m) {
+    const visits = m.visits || [];
+    if (!visits.length) return;
+    const last = visits[visits.length - 1];
+    if (last.note === "特典利用") return; // 特典利用の取り消しは対象外
+    const newVisits = visits.slice(0, -1);
+    const dec = firebase.firestore.FieldValue.increment;
+    await state.db.collection("members").doc(m.id).update({
+      visitCount: dec(-1),
+      totalSpend: dec(-(last.amount || 0)),
+      points: dec(-1),
+      totalPointsEarned: dec(-1),
+      visits: newVisits,
+    });
+    try {
+      const snap = await state.db.collection("visitLog")
+        .where("memberId", "==", m.id)
+        .orderBy("createdAt", "desc")
+        .limit(1)
+        .get();
+      if (!snap.empty) await snap.docs[0].ref.delete();
+    } catch (err) { /* 分析集計用の記録なので、削除に失敗しても取り消し自体は成功している */ }
   }
 
   async function grantReferralBonus(referredMember) {

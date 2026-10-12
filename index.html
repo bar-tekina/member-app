@@ -3475,8 +3475,13 @@ Barてきな？ 一同`;
             if (addMemberToRegister(member)) showToast(`${member.name || "会員"}さんを読み取りました`);
             render();
           },
-          () => {
-            showToast("カメラでの自動読み取りが使えないため、写真を1枚撮って読み取ります。");
+          (reason) => {
+            const msg = reason === "denied"
+              ? "このサイトのカメラ利用が許可されていません。端末の設定でカメラを許可すると、かざすだけで読み取れるようになります。今回は写真を1枚撮って読み取ります。"
+              : reason === "nocamera"
+                ? "カメラが見つかりませんでした。写真を1枚撮って読み取ります。"
+                : "カメラでの自動読み取りが使えないため、写真を1枚撮って読み取ります。";
+            showToast(msg);
             $qrFile.click();
           }
         );
@@ -3787,13 +3792,36 @@ Barてきな？ 一同`;
     return m ? m[1] : null;
   }
 
+  // 明暗差が小さい(反射・暗所などで)写真でもjsQRが認識しやすくなるよう、
+  // 白黒のコントラストを最大まで引き伸ばす。QRの読み取りだけに使う一時処理
+  // なので、元の写真(本人確認書類などの保存用画像)には一切使わない。
+  function stretchContrastForQr(imageData) {
+    const data = imageData.data;
+    let min = 255, max = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    const range = Math.max(1, max - min);
+    for (let i = 0; i < data.length; i += 4) {
+      const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
+      const nv = Math.min(255, Math.max(0, Math.round(((v - min) / range) * 255)));
+      data[i] = data[i + 1] = data[i + 2] = nv;
+    }
+    return imageData;
+  }
+
   // ---------- 会員証QRの画像を読み取って会員を特定する(写真1枚方式。フォールバック用) ----------
+  // リアルタイムスキャン(openLiveQrScanner)が使えない端末向け。写真1枚しか
+  // 試せないため、暗い/反射した写真でも読めるようコントラスト補正版でも
+  // もう一度だけ試す2段構えにしてある。
   function decodeMemberQrFile(file, callback) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
-        const maxDim = 1200;
+        const maxDim = 1600;
         const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(img.width * scale);
@@ -3804,6 +3832,10 @@ Barてきな？ 一同`;
         try {
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height) : null;
+          if (!code) {
+            const enhanced = stretchContrastForQr(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            code = window.jsQR ? window.jsQR(enhanced.data, enhanced.width, enhanced.height) : null;
+          }
         } catch (err) {
           code = null;
         }
@@ -3854,7 +3886,7 @@ Barてきな？ 一同`;
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.jsQR) {
       closeSheet();
-      if (onUnavailable) onUnavailable();
+      if (onUnavailable) onUnavailable("unsupported");
       return;
     }
 
@@ -3893,9 +3925,12 @@ Barてきな？ 一同`;
         };
         qrScannerRAF = requestAnimationFrame(tick);
       })
-      .catch(() => {
+      .catch((err) => {
         closeSheet();
-        if (onUnavailable) onUnavailable();
+        const reason = err && err.name === "NotAllowedError" ? "denied"
+          : err && err.name === "NotFoundError" ? "nocamera"
+          : "error";
+        if (onUnavailable) onUnavailable(reason);
       });
   }
 

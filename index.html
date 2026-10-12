@@ -20,6 +20,7 @@
 <!-- Firebase (compat API — chosen so the existing collection().doc().onSnapshot() style code ports unchanged) -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <style>
 /* ============================================================
    Barてきな？会員管理 — design tokens
@@ -3026,6 +3027,16 @@ ul.visit-log li .amt { color: var(--fg); font-family: var(--tnum); }
     if (!db) {
       $main.innerHTML = `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>データ保存機能を利用できません。</p><p>通信環境をご確認のうえ、ページを再読み込みしてください。</p></div>`;
       return;
+    }
+    // ---- 匿名認証(第三者がFirestoreへ直接アクセスするのを防ぐため) ----
+    // Firebaseコンソール側で「匿名」サインインが有効になっていない間は、
+    // このサインインは失敗するが、セキュリティルールがまだ全公開のうちは
+    // 動作に影響しないよう、エラーは無視してそのまま続行する。
+    try {
+      await firebase.auth().signInAnonymously();
+    } catch (err) {
+      // 匿名認証が未設定、または通信エラー。ルール側で認証必須にした後は
+      // ここが失敗すると保存機能が使えなくなるため、設定を確認すること。
     }
     state.db = db;
     state.db.collection("members").orderBy("name", "asc").onSnapshot(

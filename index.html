@@ -1130,16 +1130,54 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
   // わかりにくい状態になる。保存系の操作の直前に毎回これを呼び、
   // 未認証ならその場でもう一度サインインを試みてから書き込む。
   async function ensureAnonymousAuth() {
-    if (firebase.auth().currentUser) { state.authReady = true; return true; }
+    // LINEなどアプリ内ブラウザでは保存領域(IndexedDB)が制限されていて、
+    // currentUser が実体のないキャッシュのまま残ってしまうことがある。
+    // 存在チェックだけでなく、実際にトークンが取得できるかまで確認する。
+    if (firebase.auth().currentUser) {
+      try {
+        await firebase.auth().currentUser.getIdToken(true);
+        state.authReady = true;
+        return true;
+      } catch (err) { /* トークンが無効 → 下で再サインインする */ }
+    }
     for (let i = 0; i < 3; i++) {
       try {
         await firebase.auth().signInAnonymously();
-        if (firebase.auth().currentUser) { state.authReady = true; return true; }
+        if (firebase.auth().currentUser) {
+          // サインイン直後はFirestore側の認証状態の反映に一瞬ラグが
+          // あることがあるため、トークンを明示的に取得して確実に同期させる。
+          await firebase.auth().currentUser.getIdToken(true);
+          state.authReady = true;
+          return true;
+        }
       } catch (err) { /* 次のリトライへ */ }
       await new Promise((r) => setTimeout(r, 600 * (i + 1)));
     }
     state.authReady = false;
     return false;
+  }
+
+  // ---- 認証とFirestore側の反映に一瞬ズレがある端末向けのリトライ ----
+  // ensureAnonymousAuth() が true を返していても、ごく稀に直後の書き込みが
+  // "Missing or insufficient permissions" で一度だけ失敗することがある端末が
+  // あるため、保存処理そのものを1回だけ自動で再試行する。
+  async function withAuthRetry(writeFn) {
+    try {
+      return await writeFn();
+    } catch (err) {
+      if (err && err.code === "permission-denied") {
+        try {
+          if (firebase.auth().currentUser) {
+            await firebase.auth().currentUser.getIdToken(true);
+          } else {
+            await firebase.auth().signInAnonymously();
+          }
+        } catch (err2) { /* ここで失敗しても、下でもう一度だけ書き込みを試す */ }
+        await new Promise((r) => setTimeout(r, 1000));
+        return await writeFn();
+      }
+      throw err;
+    }
   }
 
   // ---- 会員の入店QRコード(スキャンで会計対象に自動セット) ----
@@ -1687,10 +1725,10 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       }
       try {
         if (existing) {
-          await state.db.collection("staff").doc(existing.id).update(payload);
+          await withAuthRetry(() => state.db.collection("staff").doc(existing.id).update(payload));
         } else {
           payload.createdAt = Date.now();
-          await state.db.collection("staff").add(payload);
+          await withAuthRetry(() => state.db.collection("staff").add(payload));
         }
         if (selfMode) {
           showToast("登録しました。ありがとうございます！");
@@ -2392,7 +2430,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           createdAt: new Date().toISOString(),
           idDocument: idDocDraft ? { type: $idType.value || "other", image: idDocDraft.image, uploadedAt: new Date().toISOString() } : null,
         };
-        const ref = await state.db.collection("members").add(newMemberData);
+        const ref = await withAuthRetry(() => state.db.collection("members").add(newMemberData));
         showToast(referredBy ? `「${name}」さんを登録しました(紹介特典+${REFERRAL_WELCOME_POINTS})` : `「${name}」さんを登録しました`);
         if (!state.publicJoinMode) {
           document.querySelector('nav.tabs button[data-tab="list"]').click();
@@ -2468,12 +2506,12 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
         return;
       }
       try {
-        await state.db.collection("feedback").add({
+        await withAuthRetry(() => state.db.collection("feedback").add({
           rating,
           comment,
           name: fbname || null,
           createdAt: new Date().toISOString(),
-        });
+        }));
         $main.innerHTML = `
           <div class="empty">
             <div class="glyph">🙏</div>
@@ -2987,7 +3025,7 @@ Barてきな？ 一同`;
         return;
       }
       try {
-        await state.db.collection("reservations").add({
+        await withAuthRetry(() => state.db.collection("reservations").add({
           date: state.reserveFormDate,
           time,
           partySize,
@@ -2996,7 +3034,7 @@ Barてきな？ 一同`;
           memo,
           status: "pending",
           createdAt: new Date().toISOString(),
-        });
+        }));
         $main.innerHTML = `
           <div class="empty">
             <div class="glyph">📅</div>
@@ -3973,7 +4011,7 @@ Barてきな？ 一同`;
         showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
         return;
       }
-      await state.db.collection("members").doc(m.id).update(payload);
+      await withAuthRetry(() => state.db.collection("members").doc(m.id).update(payload));
       closeSheet();
       showToast("会員情報を更新しました");
     });

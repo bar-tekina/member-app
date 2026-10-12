@@ -1508,14 +1508,25 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
   function staffListItemsHtml(list) {
     if (!list.length) return `<li class="hint" style="border:none;">まだスタッフが登録されていません。</li>`;
     return list.map((s) => `
-      <li>
-        <span>${escapeHtml(s.name || "名前未設定")}</span>
+      <li class="dormant-item">
+        <span>
+          ${escapeHtml(s.name || "名前未設定")}
+          ${s.phone ? `<span class="dormant-no-email">・${escapeHtml(s.phone)}</span>` : ""}
+          ${s.idDocument && s.idDocument.image ? `<span class="dormant-no-email">📎${escapeHtml(idDocTypeLabel(s.idDocument.type))}</span>` : ""}
+        </span>
+        <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px;" data-staff-edit="${s.id}">編集</button>
         <button type="button" class="btn btn-ghost" style="padding:3px 10px;font-size:11.5px;" data-staff-delete="${s.id}" data-staff-name="${escapeHtml(s.name || "")}">削除</button>
       </li>
     `).join("");
   }
   function bindStaffListDeleteButtons(container) {
     if (!container) return;
+    container.querySelectorAll("[data-staff-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const s = state.staffList.find((x) => x.id === btn.dataset.staffEdit);
+        if (s) openStaffFormSheet(s);
+      });
+    });
     container.querySelectorAll("[data-staff-delete]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const id = btn.dataset.staffDelete;
@@ -1532,6 +1543,123 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
           showToast("削除に失敗しました");
         }
       });
+    });
+  }
+
+  // ---- スタッフ情報の追加・編集(氏名・連絡先・住所・本人確認書類) ----
+  function staffFormSheetHtml(existing) {
+    const s = existing || {};
+    const existingDoc = s.idDocument || null;
+    return `
+      <div class="sheet-header">
+        <h2>${existing ? "スタッフ情報を編集" : "スタッフを追加"}</h2>
+        <button class="sheet-close" id="closeStaffForm" aria-label="閉じる">×</button>
+      </div>
+      <form class="stack" id="staffForm">
+        <label class="field">お名前 *
+          <input type="text" id="sf-name" name="name" value="${escapeHtml(s.name || "")}" required>
+        </label>
+        <label class="field">連絡先(電話番号)
+          <input type="tel" id="sf-phone" name="phone" value="${escapeHtml(s.phone || "")}">
+        </label>
+        <label class="field">住所
+          <input type="text" id="sf-address" name="address" value="${escapeHtml(s.address || "")}">
+        </label>
+
+        <label class="field">本人確認書類(任意・免許証/学生証/保険証など)
+          <select id="sf-id-type">
+            <option value="">書類の種類を選択</option>
+            <option value="license" ${existingDoc && existingDoc.type === "license" ? "selected" : ""}>運転免許証</option>
+            <option value="student" ${existingDoc && existingDoc.type === "student" ? "selected" : ""}>学生証</option>
+            <option value="insurance" ${existingDoc && existingDoc.type === "insurance" ? "selected" : ""}>保険証</option>
+            <option value="other" ${existingDoc && existingDoc.type === "other" ? "selected" : ""}>その他</option>
+          </select>
+        </label>
+        <div id="sf-id-preview-wrap" ${existingDoc && existingDoc.image ? "" : "hidden"}>
+          <img id="sf-id-preview" src="${existingDoc && existingDoc.image ? existingDoc.image : ""}" alt="本人確認書類プレビュー" style="max-width:160px;border-radius:10px;border:1px solid var(--line);display:block;margin-bottom:8px;">
+        </div>
+        <input type="file" accept="image/*" capture="environment" id="sf-id-file" style="display:none">
+        <div class="reg-custom-row">
+          <button type="button" class="btn btn-ghost" id="sf-id-capture" style="flex:1;">📷 ${existingDoc && existingDoc.image ? "撮り直す" : "書類を撮影する"}</button>
+          <button type="button" class="btn btn-ghost" id="sf-id-clear" ${existingDoc && existingDoc.image ? "" : "hidden"} style="flex:none;">削除</button>
+        </div>
+        <p class="hint">免許証・学生証・保険証などを撮影して保存できます(任意)。画像はこのアプリ内にのみ保存されます。</p>
+
+        <div class="action-row">
+          <button type="button" class="btn btn-ghost" id="staffFormCancel" style="flex:1;">${existing ? "一覧に戻る" : "キャンセル"}</button>
+          <button type="submit" class="btn btn-primary" style="flex:1;">保存する</button>
+        </div>
+      </form>
+    `;
+  }
+  function openStaffFormSheet(existing) {
+    const html = staffFormSheetHtml(existing);
+    openSheet(html);
+    document.getElementById("closeStaffForm").addEventListener("click", closeSheet);
+    document.getElementById("staffFormCancel").addEventListener("click", () => openStaffCodeSheet());
+
+    let idDocState = "unchanged";
+    const existingDoc = (existing && existing.idDocument) || null;
+    const $idType = document.getElementById("sf-id-type");
+    const $idFile = document.getElementById("sf-id-file");
+    const $idCapture = document.getElementById("sf-id-capture");
+    const $idClear = document.getElementById("sf-id-clear");
+    const $idPreviewWrap = document.getElementById("sf-id-preview-wrap");
+    const $idPreview = document.getElementById("sf-id-preview");
+    $idCapture.addEventListener("click", () => $idFile.click());
+    $idFile.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      compressImageFile(file, 1000, 0.7, (dataUrl) => {
+        $idFile.value = "";
+        if (!dataUrl) { showToast("画像を読み込めませんでした"); return; }
+        idDocState = { image: dataUrl };
+        $idPreview.src = dataUrl;
+        $idPreviewWrap.hidden = false;
+        $idClear.hidden = false;
+        $idCapture.textContent = "📷 撮り直す";
+      });
+    });
+    $idClear.addEventListener("click", () => {
+      idDocState = "cleared";
+      $idPreview.src = "";
+      $idPreviewWrap.hidden = true;
+      $idClear.hidden = true;
+      $idCapture.textContent = "📷 書類を撮影する";
+    });
+
+    document.getElementById("staffForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const name = (fd.get("name") || "").toString().trim();
+      if (!name) return;
+      const payload = {
+        name,
+        phone: (fd.get("phone") || "").toString().trim(),
+        address: (fd.get("address") || "").toString().trim(),
+      };
+      if (idDocState === "cleared") {
+        payload.idDocument = null;
+      } else if (idDocState !== "unchanged") {
+        payload.idDocument = { type: $idType.value || "other", image: idDocState.image, uploadedAt: new Date().toISOString() };
+      } else if (existingDoc && $idType.value !== (existingDoc.type || "")) {
+        payload.idDocument = { ...existingDoc, type: $idType.value || "other" };
+      }
+      const submitBtn = e.target.querySelector("button[type=submit]");
+      submitBtn.disabled = true;
+      try {
+        if (existing) {
+          await state.db.collection("staff").doc(existing.id).update(payload);
+        } else {
+          payload.createdAt = Date.now();
+          await state.db.collection("staff").add(payload);
+        }
+        showToast(existing ? "スタッフ情報を更新しました" : "スタッフを追加しました");
+        openStaffCodeSheet();
+      } catch (err) {
+        showToast("保存に失敗しました");
+        submitBtn.disabled = false;
+      }
     });
   }
   // staff コレクションの onSnapshot から呼ばれる。コード管理シートを開いたまま
@@ -1561,10 +1689,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
 
       <div class="section-title" style="margin-top:22px;">スタッフ一覧</div>
       <p class="hint">在籍しているスタッフの名前を記録しておけます。「削除」を押すと、名簿から消えると同時にアクセスコードも自動で再発行され、スタッフ専用アプリ側は全端末その場で自動的にロックされます(アクセスコードは全員共通のため、削除した本人以外の在籍スタッフも一旦締め出されます)。使い続けてもらう方には、新しいコード・QRコードを配り直してください。</p>
-      <form class="reg-custom-row" id="staffAddForm" style="margin-bottom:10px;">
-        <input type="text" id="staffNameInput" placeholder="スタッフの名前" style="flex:1;">
-        <button type="submit" class="btn btn-primary" style="flex:none;">追加</button>
-      </form>
+      <button type="button" class="btn btn-primary" id="staffAddBtn" style="width:100%;margin-bottom:10px;">＋ スタッフを追加</button>
       <ul class="visit-log" id="staffListContainer">
         ${staffListItemsHtml(state.staffList)}
       </ul>
@@ -1583,18 +1708,7 @@ ul.visit-log .dormant-item { flex-wrap: wrap; align-items: center; gap: 6px 10px
       }
     });
 
-    document.getElementById("staffAddForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const $input = document.getElementById("staffNameInput");
-      const name = $input.value.trim();
-      if (!name) return;
-      try {
-        await state.db.collection("staff").add({ name, createdAt: Date.now() });
-        $input.value = "";
-      } catch (err) {
-        showToast("追加に失敗しました");
-      }
-    });
+    document.getElementById("staffAddBtn").addEventListener("click", () => openStaffFormSheet(null));
 
     bindStaffListDeleteButtons(document.getElementById("staffListContainer"));
   }

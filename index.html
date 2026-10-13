@@ -2044,6 +2044,17 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 
   // ---------- render ----------
   function render() {
+    // お客様が開くページ(会員登録・会員証・来店確認・アンケート・予約)では、
+    // ヘッダーの見出しが「スタッフ専用アプリ」のままになっていて紛らわしい
+    // という指摘があったため、ここでお客様向けの見出しに切り替える。
+    const isPublicCustomerMode = state.publicJoinMode || state.publicCardMode ||
+      state.publicCheckinMode || state.publicFeedbackMode || state.publicReserveMode;
+    if ($appTitle) {
+      $appTitle.innerHTML = isPublicCustomerMode
+        ? `Bar<span class="accent">てきな？</span> 会員アプリ`
+        : `Bar<span class="accent">てきな？</span> ${state.unlocked ? "オーナー専用アプリ" : "スタッフ専用アプリ"}`;
+    }
+
     if (state.publicJoinMode) {
       $tabsNav.hidden = true;
       $scoreboard.hidden = true;

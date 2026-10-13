@@ -1145,6 +1145,9 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     publicCheckinMode: false,
     publicCardMode: false, publicCardMemberId: null, publicCardMemberFallback: null,
     publicReserveMode: false, reserveFormMonth: null, reserveFormDate: null,
+    // キオスクモード: オーナー・スタッフが自分の端末をお客様に見せて、その場で
+    // 会員登録をしてもらうための一時モード(オーナー専用の他の画面は隠す)。
+    kioskMode: false, kioskCardMemberId: null, kioskCardMemberFallback: null,
     guestSales: [], guestSalesReady: false,
     visitLog: [], visitLogReady: false,
     feedback: [], feedbackReady: false,
@@ -2048,11 +2051,58 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     // ヘッダーの見出しが「スタッフ専用アプリ」のままになっていて紛らわしい
     // という指摘があったため、ここでお客様向けの見出しに切り替える。
     const isPublicCustomerMode = state.publicJoinMode || state.publicCardMode ||
-      state.publicCheckinMode || state.publicFeedbackMode || state.publicReserveMode;
+      state.publicCheckinMode || state.publicFeedbackMode || state.publicReserveMode || state.kioskMode;
     if ($appTitle) {
       $appTitle.innerHTML = isPublicCustomerMode
         ? `Bar<span class="accent">てきな？</span> 会員アプリ`
         : `Bar<span class="accent">てきな？</span> ${state.unlocked ? "オーナー専用アプリ" : "スタッフ専用アプリ"}`;
+    }
+
+    // ---- キオスクモード ----
+    // オーナー・スタッフが自分の端末をお客様に手渡して、その場で会員登録
+    // してもらうための画面。#join(お客様自身のスマホ用)と中身は同じだが、
+    // URLは変えず、画面の表示だけを一時的に切り替える(「オーナー画面に
+    // 戻る」を押すまで、ナビゲーションや他の画面は一切表示・操作できない
+    // ようにして、お客様にオーナー専用の情報が見えてしまわないようにする)。
+    if (state.kioskMode) {
+      $tabsNav.hidden = true;
+      $scoreboard.hidden = true;
+      document.getElementById("fabAdd").hidden = true;
+      $lockBtn.hidden = true;
+      $staffCodeBtn.hidden = true;
+      $pricingBtn.hidden = true;
+      $staffSelfRegBtn.hidden = true;
+
+      const exitBtnHtml = `<button type="button" class="btn btn-ghost" id="kioskExitBtn" style="width:100%;margin-bottom:14px;">↩️ オーナー画面にもどる</button>`;
+
+      if (state.kioskCardMemberId) {
+        const cm = state.members.find((x) => x.id === state.kioskCardMemberId) || state.kioskCardMemberFallback;
+        if (!cm) {
+          $main.innerHTML = exitBtnHtml + `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>会員証が見つかりませんでした。</p></div>`;
+        } else {
+          $main.innerHTML = exitBtnHtml + memberCardPageHtml(cm);
+          bindMemberCardPage(cm);
+        }
+      } else {
+        if (!state.ready) {
+          $main.innerHTML = exitBtnHtml + `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+        } else {
+          $main.innerHTML = exitBtnHtml +
+            `<p class="hint" style="margin:4px 0 14px;">ご来店ありがとうございます。会員登録にご協力をお願いします(本人確認書類の撮影が必要です)。</p>` +
+            newMemberFormHtml();
+          bindNewMemberForm($main);
+        }
+      }
+      const $kioskExit = document.getElementById("kioskExitBtn");
+      if ($kioskExit) {
+        $kioskExit.addEventListener("click", () => {
+          state.kioskMode = false;
+          state.kioskCardMemberId = null;
+          state.kioskCardMemberFallback = null;
+          render();
+        });
+      }
+      return;
     }
 
     if (state.publicJoinMode) {
@@ -2174,8 +2224,20 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     $statBday.textContent = bdayCount;
 
     if (state.tab === "new") {
-      $main.innerHTML = newMemberFormHtml();
+      $main.innerHTML = `
+        <button type="button" class="btn btn-primary" id="startKioskBtn" style="width:100%;margin-bottom:14px;">📱 この画面をお客様に見せて、ご自身で入力してもらう</button>
+        <p class="hint" style="margin:-8px 0 14px;">お客様に端末をお渡ししても、会員登録の画面だけが表示され、他のオーナー専用の情報(会員一覧・売上など)は見えないようになります。</p>
+      ` + newMemberFormHtml();
       bindNewMemberForm($main);
+      const $startKiosk = document.getElementById("startKioskBtn");
+      if ($startKiosk) {
+        $startKiosk.addEventListener("click", () => {
+          state.kioskMode = true;
+          state.kioskCardMemberId = null;
+          state.kioskCardMemberFallback = null;
+          render();
+        });
+      }
       return;
     }
 
@@ -2553,6 +2615,13 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
           state.publicCardMemberId = ref.id;
           state.publicCardMemberFallback = { id: ref.id, ...newMemberData };
           try { history.replaceState(null, "", location.pathname + location.search + "#card" + ref.id); } catch (err) {}
+          render();
+        } else if (state.kioskMode) {
+          // オーナー・スタッフが自分の端末をお客様に見せて登録してもらった場合
+          // (キオスクモード)。URLは変えず、画面だけ会員証表示に切り替える。
+          // 「オーナー画面に戻る」を押すまでオーナー専用の内容は表示されない。
+          state.kioskCardMemberId = ref.id;
+          state.kioskCardMemberFallback = { id: ref.id, ...newMemberData };
           render();
         } else {
           document.querySelector('nav.tabs button[data-tab="list"]').click();

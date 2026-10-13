@@ -4275,6 +4275,36 @@ Barてきな？ 一同`;
   // ---------- お客様ご自身のスマホで開く、会員証の単独ページ(#card<id>) ----------
   // PIN・スタッフコード不要の公開ページ。ブックマークやホーム画面追加で
   // いつでも開き直せるようにする。
+  // 会員証ページに載せる「ランクについて」「紹介スタンプについて」の説明。
+  // わかりやすさを優先し、専門的な計算式ではなく条件を文章で案内する。
+  function memberInfoAccordionHtml() {
+    const detailStyle = `margin-top:12px;text-align:left;background:var(--bg-elev-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;`;
+    const summaryStyle = `cursor:pointer;font-weight:700;list-style:none;`;
+    return `
+      <details style="${detailStyle}">
+        <summary style="${summaryStyle}">🏅 ランクについて</summary>
+        <div class="hint" style="margin-top:10px;line-height:1.8;text-align:left;">
+          ご来店回数・ご利用金額に応じて、ランクが自動で上がります。<br>
+          ・<b>REGULAR</b>(レギュラー): どなたも最初はここからです<br>
+          ・<b>GOLD</b>(ゴールド): 累計${TIERS[1].min}回のご来店、または累計¥${TIERS[1].minSpend.toLocaleString()}のご利用で昇格<br>
+          ・<b>VIP</b>: 累計${TIERS[0].min}回のご来店、または累計¥${TIERS[0].minSpend.toLocaleString()}のご利用で昇格<br>
+          ※来店回数・ご利用金額は、どちらか一方の条件を満たせば昇格します。<br>
+          ※${TIER_DOWNGRADE_DAYS}日間ご来店がないと、一時的にランクが1つ下がります。またご来店いただければすぐに元のランクへ戻り、積み上げた回数・金額が減ることはありません。
+        </div>
+      </details>
+      <details style="${detailStyle}">
+        <summary style="${summaryStyle}">🎁 紹介スタンプについて</summary>
+        <div class="hint" style="margin-top:10px;line-height:1.8;text-align:left;">
+          お友達をご紹介いただくと、スタンプがもらえます。<br>
+          ・ご紹介された方: ご登録時に+${REFERRAL_WELCOME_POINTS}スタンプ<br>
+          ・ご紹介した方: ご紹介された方が初めてご来店された時点で+${REFERRAL_BONUS_POINTS}スタンプ<br>
+          ※不正防止のため、ご紹介しただけでは付与されず、ご紹介された方が実際にご来店されたタイミングで付与されます。<br>
+          ※お一人様が受け取れる紹介スタンプは、30日間で${REFERRAL_MONTHLY_CAP}回までです。<br>
+          ※スタンプが${REWARD_THRESHOLD}個たまるごとに「${REWARD_LABEL}」が受けられます(紹介以外の通常のご来店スタンプも対象です)。
+        </div>
+      </details>
+    `;
+  }
   function memberCardPageHtml(m) {
     return `
       <div class="checkin-card">
@@ -4286,6 +4316,7 @@ Barてきな？ 一同`;
           <div id="memberCardQrCanvas" class="qr-card-canvas"></div>
         </div>
         <p class="hint" style="margin-top:14px;">お会計の際にスタッフにこのQRを見せると、読み取ってもらえます。このページをホーム画面に追加しておくと、いつでもすぐに開けます。</p>
+        ${memberInfoAccordionHtml()}
       </div>
     `;
   }

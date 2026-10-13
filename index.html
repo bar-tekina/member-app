@@ -1053,6 +1053,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     <nav class="tabs">
       <button data-tab="list">会員一覧</button>
       <button class="active" data-tab="register">会計</button>
+      <button data-tab="attendance">出退勤</button>
       <button data-tab="new">新規登録</button>
       <button data-tab="birthday">誕生日</button>
       <button data-tab="dormant">休眠会員</button>
@@ -1160,6 +1161,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     feedback: [], feedbackReady: false,
     reservations: [], reservationsReady: false, resTabMonth: null, resTabDate: null,
     staffList: [], staffListReady: false, staffSheetOpen: false,
+    attendance: [], attendanceReady: false,
     authReady: false,
   };
 
@@ -2256,6 +2258,12 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       return;
     }
 
+    if (state.tab === "attendance") {
+      $main.innerHTML = attendanceTabHtml();
+      bindAttendanceTab($main);
+      return;
+    }
+
     if (state.tab === "reservations") {
       $main.innerHTML = reservationsTabHtml();
       bindReservationsTab($main);
@@ -2770,6 +2778,40 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     });
     return Object.values(byStaff).sort((a, b) => b.amount - a.amount);
   }
+  // 今月のスタッフ別勤務時間(目安)。出勤→退勤の記録を時系列でペアにして、
+  // その間の時間を合計する。退勤を忘れた等でペアにならない「出勤」記録は
+  // 集計に含めない(あくまで目安の集計であることをヒントで明記する)。
+  function staffAttendanceHours() {
+    const now = new Date();
+    const monthKey = now.getFullYear() + "-" + pad2(now.getMonth() + 1);
+    const sorted = state.attendance.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const openIn = {};
+    const byStaff = {};
+    sorted.forEach((a) => {
+      const name = (a.staffName || "").trim();
+      if (!name) return;
+      if (a.type === "in") {
+        openIn[name] = a.ts;
+      } else if (a.type === "out" && openIn[name] != null) {
+        const inTs = openIn[name];
+        delete openIn[name];
+        if (!a.ts || a.ts <= inTs) return;
+        const d = new Date(inTs);
+        const key = d.getFullYear() + "-" + pad2(d.getMonth() + 1);
+        if (key !== monthKey) return;
+        const minutes = Math.round((a.ts - inTs) / 60000);
+        if (!byStaff[name]) byStaff[name] = { name, minutes: 0, shifts: 0 };
+        byStaff[name].minutes += minutes;
+        byStaff[name].shifts += 1;
+      }
+    });
+    return Object.values(byStaff).sort((a, b) => b.minutes - a.minutes);
+  }
+  function minutesToHm(minutes) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return h + "時間" + (m ? m + "分" : "");
+  }
   // 曜日×時間帯ヒートマップ用。createdAt(ISO文字列)から、端末のローカル時刻での
   // 曜日・時間を取り出す。dateフィールドは日付のみで時刻を持たないため、
   // 時間帯の集計にはcreatedAtを使う(古いデータでcreatedAtが無いものは対象外)。
@@ -3042,6 +3084,92 @@ Barてきな？ 一同`;
       ` : `<p class="hint">直近60日以内に来店していない会員はいません。</p>`}
     `;
   }
+  // ---------- 出退勤(勤怠) ----------
+  // 共通のスタッフコードでアプリにログインする運用のため、個人ごとのアカウントは
+  // 無い。そこで「自分の名前を選んで出勤・退勤ボタンを押すだけ」のシンプルな
+  // 仕組みにし、各スタッフが現在「出勤中」かどうかは直前の記録(ts降順で購読
+  // しているため先頭)から判定する。
+  function attendanceTodayStr() {
+    return new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+  }
+  function latestAttendanceOf(name) {
+    return state.attendance.find((a) => (a.staffName || "") === name) || null;
+  }
+  function isOnDutyNow(name) {
+    const last = latestAttendanceOf(name);
+    return !!(last && last.type === "in");
+  }
+  async function recordAttendance(staffName, type) {
+    const now = new Date();
+    await state.db.collection("attendance").add({
+      staffName,
+      type, // "in"(出勤) または "out"(退勤)
+      ts: now.getTime(),
+      date: attendanceTodayStr(),
+      time: now.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }),
+      createdAt: now.toISOString(),
+    });
+  }
+  function todayAttendanceLog() {
+    const todayStr = attendanceTodayStr();
+    // state.attendance は ts降順で購読しているため、そのまま新しい順の表示になる
+    return state.attendance.filter((a) => a.date === todayStr);
+  }
+  function attendanceTabHtml() {
+    if (!state.staffListReady || !state.attendanceReady) {
+      return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
+    }
+    const staff = state.staffList;
+    const todayLog = todayAttendanceLog();
+    return `
+      <div class="section-title">スタッフの出勤・退勤</div>
+      ${staff.length ? `
+        <ul class="staff-list">
+          ${staff.map((s) => {
+            const name = s.name || "名前未設定";
+            const onDuty = isOnDutyNow(name);
+            return `
+              <li class="staff-card">
+                <div class="staff-card-top">
+                  <span class="staff-card-name">${escapeHtml(name)}</span>
+                  <span class="staff-card-badge${onDuty ? "" : " staff-card-badge-warn"}">${onDuty ? "🟢 出勤中" : "⚪ 退勤中"}</span>
+                </div>
+                <div class="staff-card-actions">
+                  <button type="button" class="btn ${onDuty ? "btn-ghost" : "btn-primary"}" data-attend-name="${escapeHtml(name)}" data-attend-type="in" ${onDuty ? "disabled" : ""}>出勤する</button>
+                  <button type="button" class="btn ${onDuty ? "btn-primary" : "btn-ghost"}" data-attend-name="${escapeHtml(name)}" data-attend-type="out" ${onDuty ? "" : "disabled"}>退勤する</button>
+                </div>
+              </li>
+            `;
+          }).join("")}
+        </ul>
+        <p class="hint">自分の名前の「出勤する」「退勤する」を押すだけで記録できます。間違えて押した場合は、下の「本日の記録」はオーナーが分析タブから確認・修正できます。</p>
+      ` : `<p class="hint">スタッフが登録されていません。🔑ボタンからスタッフを登録すると、ここに表示されます。</p>`}
+
+      <div class="section-title">本日の記録</div>
+      ${todayLog.length ? `
+        <ul class="visit-log">
+          ${todayLog.map((a) => `<li><span>${escapeHtml(a.staffName || "名前未設定")}・${a.type === "in" ? "出勤" : "退勤"}</span><span class="amt">${escapeHtml(a.time || "")}</span></li>`).join("")}
+        </ul>
+      ` : `<p class="hint">本日の出勤・退勤記録はまだありません。</p>`}
+    `;
+  }
+  function bindAttendanceTab(root) {
+    root.querySelectorAll("[data-attend-name]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const name = btn.dataset.attendName;
+        const type = btn.dataset.attendType;
+        root.querySelectorAll("[data-attend-name]").forEach((b) => { b.disabled = true; });
+        try {
+          await withAuthRetry(() => recordAttendance(name, type));
+          showToast(`${name}さんの${type === "in" ? "出勤" : "退勤"}を記録しました`);
+          render();
+        } catch (err) {
+          showToast("記録に失敗しました。もう一度お試しください。");
+          root.querySelectorAll("[data-attend-name]").forEach((b) => { b.disabled = false; });
+        }
+      });
+    });
+  }
   function dormantTabHtml() {
     if (!state.visitLogReady) {
       return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
@@ -3125,6 +3253,7 @@ Barてきな？ 一同`;
     const heatGrid = weekdayHourHeatmap(txns);
     const maxHeatCount = Math.max(1, ...heatGrid.flat().map((c) => c.count));
     const dartsBoard = dartsLeaderboard();
+    const attendanceHours = staffAttendanceHours();
 
     return `
       <div class="section-title">月別売上推移(直近6ヶ月)</div>
@@ -3198,6 +3327,14 @@ Barてきな？ 一同`;
         </div>
         <p class="hint">会計のたびに「対応スタッフ」を選んでもらうと、ここに実績が反映されます。選ばなかった会計は含まれていません。</p>
       ` : ""}
+
+      <div class="section-title">今月のスタッフ別勤務時間(目安)</div>
+      ${attendanceHours.length ? `
+        <ul class="visit-log">
+          ${attendanceHours.map((s) => `<li><span>${escapeHtml(s.name)}</span><span class="amt">${minutesToHm(s.minutes)}・${s.shifts}回出勤</span></li>`).join("")}
+        </ul>
+        <p class="hint">「出退勤」タブでの出勤→退勤の記録から算出した目安です。退勤を押し忘れた回は集計に含まれません。</p>
+      ` : `<p class="hint">今月の出勤・退勤記録がまだありません。「出退勤」タブから記録できます。</p>`}
 
       <div class="section-title">🎯 ダーツ勝利数ランキング TOP10</div>
       ${dartsBoard.length ? `
@@ -5027,6 +5164,16 @@ Barてきな？ 一同`;
         backfillVisitLogIfNeeded();
       },
       () => { state.visitLogReady = true; render(); }
+    );
+    // スタッフの出勤・退勤記録(勤怠)。直近500件まで新しい順に購読し、
+    // 「現在の状態(出勤中かどうか)」は各スタッフの最新1件から判定する。
+    state.db.collection("attendance").orderBy("ts", "desc").limit(500).onSnapshot(
+      (snap) => {
+        state.attendance = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        state.attendanceReady = true;
+        render();
+      },
+      () => { state.attendanceReady = true; render(); }
     );
     state.db.collection("settings").doc("staffAccess").onSnapshot(
       (doc) => {

@@ -3447,7 +3447,14 @@ Barてきな？ 一同`;
   // (仮予約)で、スタッフ・オーナーどちらでも「予約」タブで内容を確認してから
   // 「承認する」を押すと status:"confirmed"(予約確定)になる。予約数の上限は設けていない。
   function pad2(n) { return String(n).padStart(2, "0"); }
-  function todayDateStr() {
+  // 注意: この関数は予約カレンダー専用で、ISO形式("YYYY-MM-DD")の日付文字列を
+  // 返す。売上集計で使っているtodayDateStr()(ja-JPロケールの"YYYY/MM/DD"形式)
+  // とは別物。過去に同名の関数が2つ定義されており、後から読み込まれる方が
+  // 常に勝ってしまう(JavaScriptの関数宣言は同スコープ内で同名なら後のものが
+  // 上書きする)ため、売上タブの「本日の売上」「今月の累計」が日付の形式不一致
+  // (ハイフンとスラッシュ)で常に¥0になってしまう不具合があった。名前を分けて
+  // この不具合を修正している。
+  function todayDateStrISO() {
     const d = new Date();
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
   }
@@ -3490,7 +3497,7 @@ Barてきな？ 一同`;
   // ---- お客様向け予約フォーム(#reserve で公開) ----
   function reservationFormHtml() {
     if (!state.reserveFormMonth) state.reserveFormMonth = currentMonthStr();
-    const todayStr = todayDateStr();
+    const todayStr = todayDateStrISO();
     const cells = buildMonthGrid(state.reserveFormMonth);
     return `
       <p class="hint" style="margin:4px 0 14px;">ご来店のご予約はこちらから。カレンダーから日付を選び、時間・人数などを入力して送信してください。</p>
@@ -3595,13 +3602,13 @@ Barてきな？ 一同`;
       return `<div class="empty"><div class="glyph">${emptyIcon()}</div><p>読み込み中です…</p></div>`;
     }
     if (!state.resTabMonth) state.resTabMonth = currentMonthStr();
-    if (!state.resTabDate) state.resTabDate = todayDateStr();
+    if (!state.resTabDate) state.resTabDate = todayDateStrISO();
     const cells = buildMonthGrid(state.resTabMonth);
     const countByDate = {};
     state.reservations.forEach((r) => {
       if (r.status !== "cancelled") countByDate[r.date] = (countByDate[r.date] || 0) + 1;
     });
-    const todayStr = todayDateStr();
+    const todayStr = todayDateStrISO();
     const dayList = state.reservations
       .filter((r) => r.date === state.resTabDate)
       .sort((a, b) => (a.time || "").localeCompare(b.time || ""));

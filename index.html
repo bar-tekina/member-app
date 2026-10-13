@@ -260,7 +260,7 @@ main { flex: 1; padding: 4px 16px 110px; }
 
 /* ---------- Search / inputs ---------- */
 .search-row { margin-bottom: 14px; }
-input, textarea {
+input, textarea, select {
   width: 100%;
   background: var(--bg-elev);
   border: 1px solid var(--line);
@@ -1134,6 +1134,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       extensions: 0, menu: {}, customItems: [], members: [], guest: false, memberQuery: "",
       registerView: "course", // "course"(飲み放題) | "tanpin"(単品) — 会計画面でどちらをスワイプ表示中か
       memberSearchFocused: false, // 会員検索欄に今フォーカスがあるか(無関係な操作でキーボードが出ないようにするため)
+      staffName: "", // この会計を担当したスタッフ(任意・スタッフ別実績の集計に使う)
     };
   }
 
@@ -2732,6 +2733,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         label: "一般客(非会員)",
         sub: g.note || "",
         createdAt: g.createdAt || "",
+        staffName: g.staffName || "",
       });
     });
     state.visitLog.forEach((v) => {
@@ -2741,9 +2743,25 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         label: v.memberName || "名前未設定",
         sub: v.note || "",
         createdAt: v.createdAt || "",
+        staffName: v.staffName || "",
       });
     });
     return list;
+  }
+  // スタッフ別実績(対応スタッフを選んで記録された会計のみを集計)。
+  // 「選択しない」のまま記録された会計は対象外のため、合計がsalesTabの総額と
+  // 一致しなくてよい(あくまでスタッフ別の目安)。
+  function staffPerformance() {
+    const txns = allTransactions();
+    const byStaff = {};
+    txns.forEach((t) => {
+      const name = (t.staffName || "").trim();
+      if (!name) return;
+      if (!byStaff[name]) byStaff[name] = { name, count: 0, amount: 0 };
+      byStaff[name].count += 1;
+      byStaff[name].amount += t.amount;
+    });
+    return Object.values(byStaff).sort((a, b) => b.amount - a.amount);
   }
   function salesTabHtml() {
     const txns = allTransactions();
@@ -3019,6 +3037,8 @@ Barてきな？ 一同`;
     const memberCountForPct = Math.max(1, state.members.length);
 
     const referrers = referralLeaders();
+    const staffStats = staffPerformance();
+    const maxStaffAmount = Math.max(1, ...staffStats.map((s) => s.amount));
 
     return `
       <div class="section-title">月別売上推移(直近6ヶ月)</div>
@@ -3066,6 +3086,14 @@ Barてきな？ 一同`;
         ${barRowHtml("REGULAR", tierCounts.regular, memberCountForPct, tierCounts.regular + "人")}
       </div>
       <p class="hint">GOLD・VIPの比率が増えるほど、常連客を軸にした経営に近づいています。</p>
+
+      ${staffStats.length ? `
+        <div class="section-title">スタッフ別実績(会計時に対応スタッフを選んだ分のみ)</div>
+        <div class="bar-list">
+          ${staffStats.map((s) => barRowHtml(s.name, s.amount, maxStaffAmount, "¥" + s.amount.toLocaleString() + "・" + s.count + "件")).join("")}
+        </div>
+        <p class="hint">会計のたびに「対応スタッフ」を選んでもらうと、ここに実績が反映されます。選ばなかった会計は含まれていません。</p>
+      ` : ""}
 
       <div class="section-title">紹介で会員を増やしてくれている人 TOP5</div>
       ${referrers.length ? `
@@ -3503,6 +3531,15 @@ Barてきな？ 一同`;
         <div class="section-title">会計対象</div>
         ${targetHtml}
 
+        ${state.staffList.length ? `
+          <div class="section-title">対応スタッフ(任意)</div>
+          <select id="regStaffSelect">
+            <option value="">選択しない</option>
+            ${state.staffList.map((s) => `<option value="${escapeHtml(s.name || "")}" ${reg.staffName === (s.name || "") ? "selected" : ""}>${escapeHtml(s.name || "名前未設定")}</option>`).join("")}
+          </select>
+          <p class="hint">選んでおくと、オーナーの「分析」タブでスタッフ別の実績が見られるようになります。</p>
+        ` : ""}
+
         <div class="reg-total-box">
           <div class="reg-total-label">合計金額</div>
           <div class="reg-total-amount num">¥${total.toLocaleString()}</div>
@@ -3716,6 +3753,11 @@ Barてきな？ 一同`;
       }
     }
 
+    const $staffSelect = root.querySelector("#regStaffSelect");
+    if ($staffSelect) {
+      $staffSelect.addEventListener("change", (e) => { reg.staffName = e.target.value; });
+    }
+
     const $confirm = root.querySelector("#regConfirm");
     if ($confirm) {
       $confirm.addEventListener("click", async () => {
@@ -3748,7 +3790,7 @@ Barてきな？ 一同`;
               const member = state.members.find((x) => x.id === reg.members[i].id);
               if (!member) continue;
               const splitNote = isSplit ? `${note}(${reg.members.length}名で按分・1人分¥${memberShares[i].toLocaleString()})` : note;
-              await withAuthRetry(() => recordVisit(member, memberShares[i], splitNote));
+              await withAuthRetry(() => recordVisit(member, memberShares[i], splitNote, reg.staffName));
               names.push(member.name || "会員");
             }
             if (guestPortion > 0) {
@@ -3757,6 +3799,7 @@ Barてきな？ 一同`;
                 note: `${note}(会員${reg.members.length}名以外の按分分)`,
                 date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
                 createdAt: new Date().toISOString(),
+                staffName: reg.staffName || "",
               }));
             }
             showToast(`${names.join("・")}さんの会計(合計¥${total.toLocaleString()})を記録しました`);
@@ -3766,6 +3809,7 @@ Barてきな？ 一同`;
               note,
               date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
               createdAt: new Date().toISOString(),
+              staffName: reg.staffName || "",
             }));
             showToast(`一般客の会計(¥${total.toLocaleString()})を記録しました`);
           }
@@ -4311,6 +4355,7 @@ Barてきな？ 一同`;
         <div class="pc-avatar" style="margin:0 auto 10px;">${escapeHtml(initials(m.name))}</div>
         <h2 class="checkin-title">${escapeHtml(m.name || "名前未設定")}さんの会員証</h2>
         <p class="checkin-sub">${escapeHtml(tierOf(m).label)}・スタンプ ${m.points || 0}pt</p>
+        <p class="hint" style="margin-top:2px;">${escapeHtml(tierNextInfo(m))}</p>
         <button type="button" class="btn btn-primary" id="showMemberQrBtn" style="width:100%;margin-top:16px;">📱 QRを表示する</button>
         <div class="qr-card-wrap" id="memberCardQrWrap" style="margin-top:14px;" hidden>
           <div id="memberCardQrCanvas" class="qr-card-canvas"></div>
@@ -4345,7 +4390,7 @@ Barてきな？ 一同`;
     });
   }
 
-  async function recordVisit(m, amount, note) {
+  async function recordVisit(m, amount, note, staffName) {
     const wasFirstVisit = (m.visitCount || 0) === 0;
     const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
     // ts: ランクの失効判定(直近の来店からの経過日数)を日付文字列の解析に
@@ -4379,6 +4424,7 @@ Barてきな？ 一同`;
         amount: amount || 0,
         note: note || "",
         createdAt: new Date().toISOString(),
+        staffName: staffName || "",
       });
     } catch (err) { /* 集計用の記録なので失敗しても会計自体は継続する */ }
 

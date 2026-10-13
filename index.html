@@ -1133,6 +1133,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       // 会員と非会員が同じグループにいる場合、複数人をここに追加できる。
       extensions: 0, menu: {}, customItems: [], members: [], guest: false, memberQuery: "",
       registerView: "course", // "course"(飲み放題) | "tanpin"(単品) — 会計画面でどちらをスワイプ表示中か
+      memberSearchFocused: false, // 会員検索欄に今フォーカスがあるか(無関係な操作でキーボードが出ないようにするため)
     };
   }
 
@@ -3571,6 +3572,14 @@ Barてきな？ 一同`;
     const $memberSearch = root.querySelector("#regMemberSearch");
     const $memberResults = root.querySelector("#regMemberResults");
     if ($memberSearch) {
+      // 会計画面はコースの人数ボタンなど他の操作でも頻繁にrender()が
+      // 呼ばれる(=この関数が呼ばれ直す)。以前はrender()のたびに無条件で
+      // この検索欄へフォーカスを戻していたため、人数の＋－を押すだけで
+      // スマホのキーボードが毎回ポップアップしてしまっていた。
+      // 「直前にこの検索欄を実際に触っていたか」をreg側に保持しておき、
+      // そのときだけフォーカス・カーソル位置を復元する。
+      $memberSearch.addEventListener("focus", () => { reg.memberSearchFocused = true; });
+      $memberSearch.addEventListener("blur", () => { reg.memberSearchFocused = false; });
       $memberSearch.addEventListener("input", (e) => {
         reg.memberQuery = e.target.value;
         const q = reg.memberQuery.trim().toLowerCase();
@@ -3597,9 +3606,11 @@ Barてきな？ 一同`;
         }
         $memberResults.hidden = false;
       });
-      const pos = $memberSearch.value.length;
-      $memberSearch.focus();
-      $memberSearch.setSelectionRange(pos, pos);
+      if (reg.memberSearchFocused) {
+        const pos = $memberSearch.value.length;
+        $memberSearch.focus();
+        $memberSearch.setSelectionRange(pos, pos);
+      }
     }
 
     const $confirm = root.querySelector("#regConfirm");
@@ -3778,28 +3789,49 @@ Barてきな？ 一同`;
 
     document.getElementById("visitForm").addEventListener("submit", async (e) => {
       e.preventDefault();
+      // 送信中にボタンを連打(ダブルタップ)されると、来店記録・スタンプが
+      // 二重に記録されてしまうため、処理中はボタンを無効化する。
+      const $visitBtn = e.target.querySelector("button[type=submit]");
+      if ($visitBtn) $visitBtn.disabled = true;
       const fd = new FormData(e.target);
       const amount = fd.get("amount") ? Number(fd.get("amount")) : 0;
-      await recordVisit(m, amount);
-      closeSheet();
-      showToast(`来店を記録しました(+1スタンプ)`);
+      try {
+        await recordVisit(m, amount);
+        closeSheet();
+        showToast(`来店を記録しました(+1スタンプ)`);
+      } catch (err) {
+        showToast("記録に失敗しました。もう一度お試しください。");
+        if ($visitBtn) $visitBtn.disabled = false;
+      }
     });
 
     const redeemBtn = document.getElementById("redeemBtn");
     if (redeemBtn) {
       redeemBtn.addEventListener("click", async () => {
-        await redeemReward(m);
-        closeSheet();
-        showToast("特典利用として記録しました");
+        redeemBtn.disabled = true;
+        try {
+          await redeemReward(m);
+          closeSheet();
+          showToast("特典利用として記録しました");
+        } catch (err) {
+          showToast("記録に失敗しました。もう一度お試しください。");
+          redeemBtn.disabled = false;
+        }
       });
     }
 
     const undoVisitBtn = document.getElementById("undoVisitBtn");
     if (undoVisitBtn) {
       undoVisitBtn.addEventListener("click", async () => {
-        await undoLastVisit(m);
-        closeSheet();
-        showToast("直前の来店記録を取り消しました");
+        undoVisitBtn.disabled = true;
+        try {
+          await undoLastVisit(m);
+          closeSheet();
+          showToast("直前の来店記録を取り消しました");
+        } catch (err) {
+          showToast("取り消しに失敗しました。もう一度お試しください。");
+          undoVisitBtn.disabled = false;
+        }
       });
     }
 

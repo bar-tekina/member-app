@@ -2790,21 +2790,29 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     `;
   }
   function dormantMembers() {
+    const DORMANT_DAYS = 60;
     const now = Date.now();
     const list = [];
     state.members.forEach((m) => {
       const visits = m.visits || [];
       if (!visits.length) {
-        list.push({ m, daysSince: null });
+        // 来店記録が一度もない会員(登録したばかりの会員など)は、
+        // 登録日から60日以上経っている場合のみ「休眠」として扱う。
+        // 以前はここが無条件で一覧に出てしまい、#joinで登録した直後の
+        // 新規会員まで毎回「休眠会員」に表示されてしまっていた。
+        const createdTs = m.createdAt ? new Date(m.createdAt).getTime() : NaN;
+        if (isNaN(createdTs)) return;
+        const days = Math.floor((now - createdTs) / (24 * 60 * 60 * 1000));
+        if (days >= DORMANT_DAYS) list.push({ m, daysSince: days, neverVisited: true });
         return;
       }
       const last = visits[visits.length - 1];
       const lastDate = new Date(last.date);
       if (isNaN(lastDate.getTime())) return;
       const days = Math.floor((now - lastDate.getTime()) / (24 * 60 * 60 * 1000));
-      if (days >= 60) list.push({ m, daysSince: days });
+      if (days >= DORMANT_DAYS) list.push({ m, daysSince: days });
     });
-    return list.sort((a, b) => (b.daysSince == null ? 1 : b.daysSince) - (a.daysSince == null ? 1 : a.daysSince)).slice(0, 12);
+    return list.sort((a, b) => b.daysSince - a.daysSince).slice(0, 12);
   }
   // 休眠会員向けの再来店案内メール(mailto:リンク)。文面はあらかじめ用意した
   // 自然な案内文で、名前だけ差し込む。送信はスタッフがメールアプリ側で
@@ -2838,7 +2846,7 @@ Barてきな？ 一同`;
             return `
               <li class="dormant-item">
                 <span>${escapeHtml(d.m.name || "名前未設定")}</span>
-                <span class="amt">${d.daysSince == null ? "来店記録なし" : d.daysSince + "日前"}</span>
+                <span class="amt">${d.neverVisited ? "来店記録なし(登録から" + d.daysSince + "日)" : d.daysSince + "日前"}</span>
                 ${mailLink
                   ? `<a class="btn btn-ghost dormant-mail-btn" href="${mailLink}">✉️ 案内メールを送る</a>`
                   : (showMailButton ? `<span class="dormant-no-email">メール未登録</span>` : "")}
@@ -3224,14 +3232,26 @@ Barてきな？ 一同`;
     });
     root.querySelectorAll("[data-res-confirm]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        await state.db.collection("reservations").doc(btn.dataset.resConfirm).update({ status: "confirmed" });
-        showToast("予約を確定しました");
+        btn.disabled = true;
+        try {
+          await withAuthRetry(() => state.db.collection("reservations").doc(btn.dataset.resConfirm).update({ status: "confirmed" }));
+          showToast("予約を確定しました");
+        } catch (err) {
+          showToast("更新に失敗しました。もう一度お試しください。");
+          btn.disabled = false;
+        }
       });
     });
     root.querySelectorAll("[data-res-cancel]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        await state.db.collection("reservations").doc(btn.dataset.resCancel).update({ status: "cancelled" });
-        showToast("予約をキャンセルにしました");
+        btn.disabled = true;
+        try {
+          await withAuthRetry(() => state.db.collection("reservations").doc(btn.dataset.resCancel).update({ status: "cancelled" }));
+          showToast("予約をキャンセルにしました");
+        } catch (err) {
+          showToast("更新に失敗しました。もう一度お試しください。");
+          btn.disabled = false;
+        }
       });
     });
   }

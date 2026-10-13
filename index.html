@@ -3124,6 +3124,7 @@ Barてきな？ 一同`;
     const maxStaffAmount = Math.max(1, ...staffStats.map((s) => s.amount));
     const heatGrid = weekdayHourHeatmap(txns);
     const maxHeatCount = Math.max(1, ...heatGrid.flat().map((c) => c.count));
+    const dartsBoard = dartsLeaderboard();
 
     return `
       <div class="section-title">月別売上推移(直近6ヶ月)</div>
@@ -3197,6 +3198,14 @@ Barてきな？ 一同`;
         </div>
         <p class="hint">会計のたびに「対応スタッフ」を選んでもらうと、ここに実績が反映されます。選ばなかった会計は含まれていません。</p>
       ` : ""}
+
+      <div class="section-title">🎯 ダーツ勝利数ランキング TOP10</div>
+      ${dartsBoard.length ? `
+        <ul class="visit-log">
+          ${dartsBoard.map((r, i) => `<li><span>${i + 1}位・${escapeHtml(r.m.name || "名前未設定")}</span><span class="amt">${r.wins}勝</span></li>`).join("")}
+        </ul>
+        <p class="hint">会員詳細画面の「＋1勝を記録」で記録できます。上位の方にはイベントやコンテストの案内にも使えます。</p>
+      ` : `<p class="hint">まだダーツの勝利記録がありません。会員詳細画面から記録を始められます。</p>`}
 
       <div class="section-title">紹介で会員を増やしてくれている人 TOP5</div>
       ${referrers.length ? `
@@ -3997,6 +4006,13 @@ Barてきな？ 一同`;
       ${canUndoVisit ? `<button type="button" class="btn btn-ghost" id="undoVisitBtn" style="width:100%;margin-top:6px;">↩️ 直前の来店(${escapeHtml(lastVisitEntry.date)})を取り消す</button>` : ""}
       ${readyForReward ? `<button class="btn btn-ghost" id="redeemBtn" style="width:100%;margin-top:4px;">特典を利用済みにする</button>` : ""}
 
+      <div class="section-title">🎯 ダーツ対戦成績</div>
+      <p class="hint">通算 <b class="num">${m.dartsWins || 0}</b> 勝${(m.dartsWins || 0) > 0 ? `${m.dartsLastWinDate ? `(直前の勝利: ${escapeHtml(m.dartsLastWinDate)})` : ""}` : ""}</p>
+      <div class="action-row">
+        <button type="button" class="btn btn-primary" id="dartsWinBtn">＋1勝を記録</button>
+        ${(m.dartsWins || 0) > 0 ? `<button type="button" class="btn btn-ghost" id="dartsUndoBtn">1勝取り消す</button>` : ""}
+      </div>
+
       <div class="section-title">連絡先・メモ</div>
       <p class="hint">電話: ${escapeHtml(m.phone || "未登録")} ／ 誕生日: ${bdayText}${age != null ? `(満${age}歳)` : ""}</p>
       <p class="hint">住所: ${escapeHtml(m.address || "未登録")}</p>
@@ -4081,6 +4097,35 @@ Barてきな？ 一同`;
         } catch (err) {
           showToast("取り消しに失敗しました。もう一度お試しください。");
           undoVisitBtn.disabled = false;
+        }
+      });
+    }
+
+    const dartsWinBtn = document.getElementById("dartsWinBtn");
+    if (dartsWinBtn) {
+      dartsWinBtn.addEventListener("click", async () => {
+        dartsWinBtn.disabled = true;
+        try {
+          await withAuthRetry(() => recordDartsWin(m));
+          closeSheet();
+          showToast("ダーツ1勝を記録しました🎯");
+        } catch (err) {
+          showToast("記録に失敗しました。もう一度お試しください。");
+          dartsWinBtn.disabled = false;
+        }
+      });
+    }
+    const dartsUndoBtn = document.getElementById("dartsUndoBtn");
+    if (dartsUndoBtn) {
+      dartsUndoBtn.addEventListener("click", async () => {
+        dartsUndoBtn.disabled = true;
+        try {
+          await withAuthRetry(() => undoDartsWin(m));
+          closeSheet();
+          showToast("1勝取り消しました");
+        } catch (err) {
+          showToast("取り消しに失敗しました。もう一度お試しください。");
+          dartsUndoBtn.disabled = false;
         }
       });
     }
@@ -4570,6 +4615,31 @@ Barてきな？ 一同`;
         .get();
       if (!snap.empty) await snap.docs[0].ref.delete();
     } catch (err) { /* 分析集計用の記録なので、削除に失敗しても取り消し自体は成功している */ }
+  }
+
+  // ---------- ダーツ対戦成績(簡易) ----------
+  // 本格的な対戦記録(相手・スコアなど)までは扱わず、「勝った回数」だけを
+  // 会員ごとに記録するシンプルな仕様。オーナー専用アプリの「分析」タブに
+  // ランキングとして表示する。
+  async function recordDartsWin(m) {
+    const inc = firebase.firestore.FieldValue.increment;
+    const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    await state.db.collection("members").doc(m.id).update({
+      dartsWins: inc(1),
+      dartsLastWinDate: dateStr,
+    });
+  }
+  async function undoDartsWin(m) {
+    if (!(m.dartsWins || 0)) return;
+    const dec = firebase.firestore.FieldValue.increment;
+    await state.db.collection("members").doc(m.id).update({ dartsWins: dec(-1) });
+  }
+  function dartsLeaderboard() {
+    return state.members
+      .map((m) => ({ m, wins: m.dartsWins || 0 }))
+      .filter((x) => x.wins > 0)
+      .sort((a, b) => b.wins - a.wins)
+      .slice(0, 10);
   }
 
   async function grantReferralBonus(referredMember) {

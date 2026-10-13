@@ -1097,6 +1097,20 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   const REWARD_THRESHOLD = 5;
   const REWARD_LABEL = "ドリンク1杯サービス";
 
+  // 深夜営業(日付をまたいでの営業)のため、会計・来店記録の「日付」は
+  // カレンダー通りの日付ではなく「営業日」で記録する。例えば23時に来店し、
+  // 日付が変わった後の午前2時に会計(退店)しても、来店した日(前日)の
+  // 記録として扱われる。この時刻より前(未明)の会計は「前日」の営業日とみなす。
+  const BUSINESS_DAY_CUTOFF_HOUR = 6;
+  function businessDateNow() {
+    const d = new Date();
+    if (d.getHours() < BUSINESS_DAY_CUTOFF_HOUR) d.setDate(d.getDate() - 1);
+    return d;
+  }
+  function businessDateStr() {
+    return businessDateNow().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+  }
+
   // 誕生日クーポン: スタンプ制の特典とは別に、誕生日月に自動で使えるようになる
   // クーポン。「自動化」はここでは「誰も手動で発行しなくても、誕生日月に
   // なれば自動的に使える状態になる」という意味。m.birthdayCouponUsedYear
@@ -4092,7 +4106,7 @@ Barてきな？ 一同`;
               await withAuthRetry(() => state.db.collection("guestSales").add({
                 amount: guestPortion,
                 note: `${note}(会員${reg.members.length}名以外の按分分)`,
-                date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
+                date: businessDateStr(),
                 createdAt: new Date().toISOString(),
                 staffName: reg.staffName || "",
               }));
@@ -4102,7 +4116,7 @@ Barてきな？ 一同`;
             await withAuthRetry(() => state.db.collection("guestSales").add({
               amount: total,
               note,
-              date: new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" }),
+              date: businessDateStr(),
               createdAt: new Date().toISOString(),
               staffName: reg.staffName || "",
             }));
@@ -4752,7 +4766,7 @@ Barてきな？ 一同`;
 
   async function recordVisit(m, amount, note, staffName) {
     const wasFirstVisit = (m.visitCount || 0) === 0;
-    const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    const dateStr = businessDateStr();
     // ts: ランクの失効判定(直近の来店からの経過日数)を日付文字列の解析に
     // 依存せず正確に行うための実時刻。古い記録にはtsが無いため、その場合は
     // date文字列(yyyy/mm/dd)から解析する(lastVisitTsOf参照)。
@@ -4887,7 +4901,7 @@ Barてきな？ 一同`;
   }
 
   async function redeemReward(m) {
-    const dateStr = new Date().toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" });
+    const dateStr = businessDateStr();
     const visits = (m.visits || []).concat([{ date: dateStr, amount: 0, note: "特典利用", ts: Date.now() }]).slice(-15);
     // 特典利用後の残ポイントは「0固定」ではなく、現在のスタンプ数から
     // REWARD_THRESHOLD分だけ引く(例: 12個溜まっていたら7個残す)。
@@ -5082,6 +5096,16 @@ Barてきな？ 一同`;
   // その時点の member.visits を visitLog にコピーし、以後は recordVisit() が
   // 両方に書き込む。member.visitLogBackfilled フラグで二重実行を防ぐ。
   let backfillRunning = false;
+  // この関数は「以前バックフィルが完了していない会員」を対象に、
+  // member.visits(直近15件)の内容をvisitLogにも書き写す一度だけの移行処理。
+  // 以前は「対象かどうか」をmember側のフラグだけで判定していたため、
+  // フラグの保存が(権限エラーや複数端末での同時実行などで)失敗して
+  // 何度もやり直されると、すでにリアルタイムでvisitLogに記録済みの
+  // 来店が再度書き込まれ、「最近の会計・来店記録」に同じ人が重複して
+  // 表示される不具合があった。そこで、書き込む前に必ず
+  // 「そのメンバーのvisitLogが本当に1件も無いか」をFirestore側で確認し、
+  // 既に何かあれば一切書き込まずフラグだけ立てるようにして、何度実行しても
+  // 重複が増えないようにしている。
   async function backfillVisitLogIfNeeded() {
     if (!state.db || !state.ready || !state.visitLogReady || backfillRunning) return;
     const targets = state.members.filter((m) => !m.visitLogBackfilled && (m.visits || []).length);
@@ -5089,24 +5113,85 @@ Barてきな？ 一同`;
     backfillRunning = true;
     try {
       for (const m of targets) {
-        const writes = (m.visits || []).map((v) =>
-          state.db.collection("visitLog").add({
-            memberId: m.id,
-            memberName: m.name || "名前未設定",
-            date: v.date || "",
-            amount: Number(v.amount) || 0,
-            note: v.note || "",
-            createdAt: "",
-            backfilled: true,
-          })
-        );
-        await Promise.all(writes);
-        await state.db.collection("members").doc(m.id).update({ visitLogBackfilled: true });
+        try {
+          const existing = await state.db.collection("visitLog").where("memberId", "==", m.id).limit(1).get();
+          if (existing.empty) {
+            const writes = (m.visits || []).map((v) =>
+              withAuthRetry(() => state.db.collection("visitLog").add({
+                memberId: m.id,
+                memberName: m.name || "名前未設定",
+                date: v.date || "",
+                amount: Number(v.amount) || 0,
+                note: v.note || "",
+                createdAt: "",
+                backfilled: true,
+              }))
+            );
+            await Promise.all(writes);
+          }
+          await withAuthRetry(() => state.db.collection("members").doc(m.id).update({ visitLogBackfilled: true }));
+        } catch (err) {
+          // この会員のバックフィルだけ失敗しても、他の会員の処理は続ける
+          // (フラグが立たなければ次回また対象になるだけで、重複は発生しない)
+        }
       }
-    } catch (err) {
-      // 集計用のバックフィルなので、失敗しても通常の会計・登録機能には影響しない
     } finally {
       backfillRunning = false;
+    }
+  }
+
+  // ---------- visitLogの重複クリーンアップ(一度だけ実行) ----------
+  // 上記の不具合により過去に生まれてしまった重複(backfilled:trueの記録が
+  // 同じ内容で複数ある、またはリアルタイム記録と同じ内容のbackfilled:trueの
+  // 記録が残っている)を取り除く。安全のため「backfilled:trueの記録」だけを
+  // 削除対象にし、通常の会計で記録された本物の来店記録(backfilledが付いて
+  // いないもの)は絶対に削除しない。settings/app の visitLogDedupeV1Done
+  // フラグで一度だけ実行し、以後は毎回実行しない。
+  let dedupeAttempted = false;
+  async function dedupeVisitLogBackfillDuplicates() {
+    if (dedupeAttempted || !state.db) return;
+    dedupeAttempted = true;
+    try {
+      const appDoc = await state.db.collection("settings").doc("app").get();
+      if (appDoc.exists && appDoc.data() && appDoc.data().visitLogDedupeV1Done) return;
+
+      const snap = await state.db.collection("visitLog").get();
+      const groups = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const key = [data.memberId || "", data.date || "", Number(data.amount) || 0, data.note || ""].join("|");
+        if (!groups[key]) groups[key] = [];
+        groups[key].push({ id: d.id, backfilled: !!data.backfilled });
+      });
+
+      const toDelete = [];
+      Object.values(groups).forEach((group) => {
+        if (group.length < 2) return;
+        const hasReal = group.some((g) => !g.backfilled);
+        if (hasReal) {
+          // 本物の記録があるグループ: backfilled側を全て重複として削除
+          group.filter((g) => g.backfilled).forEach((g) => toDelete.push(g.id));
+        } else {
+          // 全てbackfilled(=古いバックフィルが複数回行われた)グループ:
+          // 1件だけ残し、残りを削除
+          group.slice(1).forEach((g) => toDelete.push(g.id));
+        }
+      });
+
+      // Firestoreのバッチは1回500件までのため、450件ずつに分けて削除する
+      for (let i = 0; i < toDelete.length; i += 450) {
+        const batch = state.db.batch();
+        toDelete.slice(i, i + 450).forEach((id) => batch.delete(state.db.collection("visitLog").doc(id)));
+        await withAuthRetry(() => batch.commit());
+      }
+
+      await withAuthRetry(() => state.db.collection("settings").doc("app").set({ visitLogDedupeV1Done: true }, { merge: true }));
+      if (toDelete.length) {
+        showToast(`来店記録の重複${toDelete.length}件を整理しました`);
+      }
+    } catch (err) {
+      // 失敗しても通常機能には影響しない。次回のページ読み込みで再試行される。
+      dedupeAttempted = false;
     }
   }
 
@@ -5243,6 +5328,7 @@ Barてきな？ 一同`;
         state.visitLogReady = true;
         render();
         backfillVisitLogIfNeeded();
+        dedupeVisitLogBackfillDuplicates();
       },
       () => { state.visitLogReady = true; render(); }
     );

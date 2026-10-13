@@ -2204,7 +2204,10 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       $pricingBtn.hidden = true;
       $staffSelfRegBtn.hidden = true;
       const now = new Date();
-      const dateStr = now.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+      // 深夜営業のため、日付が変わった後(午前6時より前)の来店は「前日」の
+      // 営業日として表示する(会計の日付の考え方と合わせている)。時刻の表示
+      // は実際の時刻のまま変えない。
+      const dateStr = businessDateNow().toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
       const timeStr = now.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
       $main.innerHTML = `
         <div class="checkin-card">

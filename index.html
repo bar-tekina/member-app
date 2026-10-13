@@ -4084,40 +4084,10 @@ Barてきな？ 一同`;
           $confirm.disabled = false;
           return;
         }
-        try {
-          if (reg.members.length > 0) {
-            // 会員が複数人いる場合、合計金額を人数で按分する。按分の基準人数は
-            // 「飲み放題/単品で入力した総人数」と「選んだ会員の人数」の大きい方
-            // (人数未入力でも選んだ会員の人数では必ず割れるようにするため)。
-            const headcount = (reg.course.male || 0) + (reg.course.female || 0) + (reg.tanpinCount || 0);
-            const denom = Math.max(reg.members.length, headcount || reg.members.length);
-            const base = Math.floor(total / denom);
-            const remainder = total % denom;
-            const shares = [];
-            for (let i = 0; i < denom; i++) shares.push(base + (i < remainder ? 1 : 0));
-            const memberShares = shares.slice(0, reg.members.length);
-            const memberTotal = memberShares.reduce((a, b) => a + b, 0);
-            const guestPortion = total - memberTotal;
-            const isSplit = reg.members.length > 1 || guestPortion > 0;
-            const names = [];
-            for (let i = 0; i < reg.members.length; i++) {
-              const member = state.members.find((x) => x.id === reg.members[i].id);
-              if (!member) continue;
-              const splitNote = isSplit ? `${note}(${reg.members.length}名で按分・1人分¥${memberShares[i].toLocaleString()})` : note;
-              await withAuthRetry(() => recordVisit(member, memberShares[i], splitNote, reg.staffName));
-              names.push(member.name || "会員");
-            }
-            if (guestPortion > 0) {
-              await withAuthRetry(() => state.db.collection("guestSales").add({
-                amount: guestPortion,
-                note: `${note}(会員${reg.members.length}名以外の按分分)`,
-                date: businessDateStr(),
-                createdAt: new Date().toISOString(),
-                staffName: reg.staffName || "",
-              }));
-            }
-            showToast(`${names.join("・")}さんの会計(合計¥${total.toLocaleString()})を記録しました`);
-          } else {
+        if (reg.members.length === 0) {
+          // 会員を選ばない(一般客)会計は書き込みが1件だけなので、失敗しても
+          // 何も記録されておらず、そのままもう一度試してもらって問題ない。
+          try {
             await withAuthRetry(() => state.db.collection("guestSales").add({
               amount: total,
               note,
@@ -4126,11 +4096,86 @@ Barてきな？ 一同`;
               staffName: reg.staffName || "",
             }));
             showToast(`一般客の会計(¥${total.toLocaleString()})を記録しました`);
+            state.register = createEmptyRegister();
+            render();
+          } catch (err) {
+            showToast("記録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
+            $confirm.disabled = false;
           }
+          return;
+        }
+
+        // 会員が複数人いる場合、合計金額を人数で按分する。按分の基準人数は
+        // 「飲み放題/単品で入力した総人数」と「選んだ会員の人数」の大きい方
+        // (人数未入力でも選んだ会員の人数では必ず割れるようにするため)。
+        try {
+          const headcount = (reg.course.male || 0) + (reg.course.female || 0) + (reg.tanpinCount || 0);
+          const denom = Math.max(reg.members.length, headcount || reg.members.length);
+          const base = Math.floor(total / denom);
+          const remainder = total % denom;
+          const shares = [];
+          for (let i = 0; i < denom; i++) shares.push(base + (i < remainder ? 1 : 0));
+          const memberShares = shares.slice(0, reg.members.length);
+          const memberTotal = memberShares.reduce((a, b) => a + b, 0);
+          const guestPortion = total - memberTotal;
+          const isSplit = reg.members.length > 1 || guestPortion > 0;
+
+          // 会員ごとの記録は1人ずつ個別にtry/catchする。以前はループの途中で
+          // 1人分の書き込みが失敗すると例外でループ全体が止まり、画面には
+          // 「失敗しました」と出るだけで会計画面の内容(選んだ会員・人数)は
+          // そのまま残っていた。これだとスタッフが「もう一度お試しください」を
+          // 信じてもう一度「会計確定」を押すと、直前に記録が成功していた会員まで
+          // 再度記録されてしまい、スタンプ・来店記録が二重になる恐れがあった。
+          // そのため、成功した人・失敗した人を個別に把握したうえで、結果に
+          // 関わらず会計画面を必ずリセットし、失敗した分は「＋来店」から
+          // 手動で追記してもらう案内を出す(二重記録より、記録漏れを1件
+          // 分かりやすく知らせる方が安全なため)。
+          const names = [];
+          const failedNames = [];
+          for (let i = 0; i < reg.members.length; i++) {
+            const member = state.members.find((x) => x.id === reg.members[i].id);
+            if (!member) continue;
+            const splitNote = isSplit ? `${note}(${reg.members.length}名で按分・1人分¥${memberShares[i].toLocaleString()})` : note;
+            try {
+              await withAuthRetry(() => recordVisit(member, memberShares[i], splitNote, reg.staffName));
+              names.push(member.name || "会員");
+            } catch (err) {
+              failedNames.push(member.name || "会員");
+            }
+          }
+          let guestPortionFailed = false;
+          if (guestPortion > 0) {
+            try {
+              await withAuthRetry(() => state.db.collection("guestSales").add({
+                amount: guestPortion,
+                note: `${note}(会員${reg.members.length}名以外の按分分)`,
+                date: businessDateStr(),
+                createdAt: new Date().toISOString(),
+                staffName: reg.staffName || "",
+              }));
+            } catch (err) {
+              guestPortionFailed = true;
+            }
+          }
+
+          if (names.length) {
+            showToast(`${names.join("・")}さんの会計(合計¥${total.toLocaleString()})を記録しました`);
+          }
+          if (failedNames.length || guestPortionFailed) {
+            const parts = [];
+            if (failedNames.length) parts.push(`${failedNames.join("・")}さん`);
+            if (guestPortionFailed) parts.push("会員以外の分");
+            setTimeout(() => {
+              showToast(`⚠️ ${parts.join("・")}の記録に失敗しました。会員詳細の「＋来店」から金額を入力して追加記録してください。`);
+            }, names.length ? 2000 : 0);
+          }
+          // 成功・失敗に関わらず会計画面は必ずリセットする(二重記録を防ぐため)
           state.register = createEmptyRegister();
           render();
         } catch (err) {
-          showToast("記録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
+          // ここに来るのは按分計算など書き込み以前の想定外のエラーのみ
+          // (まだ何も記録されていないため、会計画面を残したままリトライ可能にする)
+          showToast("会計処理中にエラーが発生しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
           $confirm.disabled = false;
         }
       });

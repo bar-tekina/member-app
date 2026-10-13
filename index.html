@@ -1017,6 +1017,9 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 .heatmap-table th.wd-th { text-align: left; width: 34px; }
 .heatmap-table td.wd-cell { font-size: 11.5px; color: var(--fg-dim); white-space: nowrap; padding-right: 6px; }
 .heatmap-cell { width: 40px; height: 28px; border-radius: 6px; text-align: center; vertical-align: middle; font-family: var(--tnum); font-size: 10px; color: var(--fg); border: 1px solid var(--line); }
+.coupon-banner { margin-top: 14px; background: linear-gradient(135deg, rgba(236,58,168,0.14), rgba(255,206,99,0.14)); border: 1px solid var(--gold); border-radius: 12px; padding: 12px 14px; text-align: left; }
+.coupon-banner .coupon-title { font-weight: 700; font-size: 14px; color: var(--fg); }
+.coupon-banner .coupon-sub { font-size: 12px; color: var(--fg-dim); margin-top: 4px; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -1093,6 +1096,14 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 
   const REWARD_THRESHOLD = 5;
   const REWARD_LABEL = "ドリンク1杯サービス";
+
+  // 誕生日クーポン: スタンプ制の特典とは別に、誕生日月に自動で使えるようになる
+  // クーポン。「自動化」はここでは「誰も手動で発行しなくても、誕生日月に
+  // なれば自動的に使える状態になる」という意味。m.birthdayCouponUsedYear
+  // (最後に使用した年)だけをFirestoreに保存し、「今年まだ使っていなければ
+  // 誕生日月は常に使える」という計算で毎年自動的にリセットされる仕組みにして
+  // いるため、年初めや誕生日のたびに付与処理を行う必要がない。
+  const BIRTHDAY_COUPON_LABEL = "お誕生日特典・ドリンク1杯無料";
 
   // 友達紹介まわりの設定
   const REFERRAL_BONUS_POINTS = 3;   // 紹介者が受け取るボーナス(紹介された人の初来店時)
@@ -1487,6 +1498,13 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   function isBirthdayMonth(m) {
     if (!m.birthMonth) return false;
     return Number(m.birthMonth) === todayParts().m;
+  }
+  // 誕生日クーポンが「今、使える状態か」。誕生日月であり、かつ今年まだ
+  // 使っていなければtrue。年が変わる(または来年の誕生日月になる)と
+  // birthdayCouponUsedYearが去年のままになるため、自動的にまた使えるようになる。
+  function birthdayCouponAvailable(m) {
+    if (!isBirthdayMonth(m)) return false;
+    return m.birthdayCouponUsedYear !== new Date().getFullYear();
   }
   function initials(name) {
     const n = (name || "").trim();
@@ -4171,6 +4189,14 @@ Barてきな？ 一同`;
       ${canUndoVisit ? `<button type="button" class="btn btn-ghost" id="undoVisitBtn" style="width:100%;margin-top:6px;">↩️ 直前の来店(${escapeHtml(lastVisitEntry.date)})を取り消す</button>` : ""}
       ${readyForReward ? `<button class="btn btn-ghost" id="redeemBtn" style="width:100%;margin-top:4px;">特典を利用済みにする</button>` : ""}
 
+      ${birthdayCouponAvailable(m) ? `
+        <div class="coupon-banner">
+          <div class="coupon-title">🎂 ${escapeHtml(BIRTHDAY_COUPON_LABEL)}</div>
+          <div class="coupon-sub">今月の誕生日クーポンがまだ使われていません。会計時にご利用があれば押してください。</div>
+          <button type="button" class="btn btn-ghost" id="birthdayCouponBtn" style="width:100%;margin-top:10px;">クーポンを利用済みにする</button>
+        </div>
+      ` : ""}
+
       <div class="section-title">🎯 ダーツ対戦成績</div>
       <p class="hint">通算 <b class="num">${m.dartsWins || 0}</b> 勝${(m.dartsWins || 0) > 0 ? `${m.dartsLastWinDate ? `(直前の勝利: ${escapeHtml(m.dartsLastWinDate)})` : ""}` : ""}</p>
       <div class="action-row">
@@ -4247,6 +4273,21 @@ Barてきな？ 一同`;
         } catch (err) {
           showToast("記録に失敗しました。もう一度お試しください。");
           redeemBtn.disabled = false;
+        }
+      });
+    }
+
+    const birthdayCouponBtn = document.getElementById("birthdayCouponBtn");
+    if (birthdayCouponBtn) {
+      birthdayCouponBtn.addEventListener("click", async () => {
+        birthdayCouponBtn.disabled = true;
+        try {
+          await withAuthRetry(() => redeemBirthdayCoupon(m));
+          closeSheet();
+          showToast("誕生日クーポンを利用済みにしました");
+        } catch (err) {
+          showToast("記録に失敗しました。もう一度お試しください。");
+          birthdayCouponBtn.disabled = false;
         }
       });
     }
@@ -4669,6 +4710,12 @@ Barてきな？ 一同`;
         <h2 class="checkin-title">${escapeHtml(m.name || "名前未設定")}さんの会員証</h2>
         <p class="checkin-sub">${escapeHtml(tierOf(m).label)}・スタンプ ${m.points || 0}pt</p>
         <p class="hint" style="margin-top:2px;">${escapeHtml(tierNextInfo(m))}</p>
+        ${birthdayCouponAvailable(m) ? `
+          <div class="coupon-banner">
+            <div class="coupon-title">🎂 ${escapeHtml(BIRTHDAY_COUPON_LABEL)}</div>
+            <div class="coupon-sub">今月はお誕生日クーポンがご利用いただけます。ご来店時にこの画面をスタッフにお見せください。</div>
+          </div>
+        ` : ""}
         <button type="button" class="btn btn-primary" id="showMemberQrBtn" style="width:100%;margin-top:16px;">📱 QRを表示する</button>
         <div class="qr-card-wrap" id="memberCardQrWrap" style="margin-top:14px;" hidden>
           <div id="memberCardQrCanvas" class="qr-card-canvas"></div>
@@ -4848,6 +4895,12 @@ Barてきな？ 一同`;
     // 消えてしまうことがあった。
     const remaining = Math.max(0, (m.points || 0) - REWARD_THRESHOLD);
     await state.db.collection("members").doc(m.id).update({ points: remaining, visits });
+  }
+
+  // 誕生日クーポンの利用を記録する。「今年」を使用済みにするだけなので、
+  // 翌年の誕生日月になれば自動的にまた使える状態に戻る(付与処理は不要)。
+  async function redeemBirthdayCoupon(m) {
+    await state.db.collection("members").doc(m.id).update({ birthdayCouponUsedYear: new Date().getFullYear() });
   }
 
   function openEditSheet(m) {

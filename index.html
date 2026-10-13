@@ -4413,14 +4413,22 @@ Barてきな？ 一同`;
       } else if (existingDoc && $idType.value !== (existingDoc.type || "")) {
         payload.idDocument = { ...existingDoc, type: $idType.value || "other" };
       }
+      const $editBtn = e.target.querySelector("button[type=submit]");
+      if ($editBtn) $editBtn.disabled = true;
       const authOk = await ensureAnonymousAuth();
       if (!authOk) {
         showToast("認証に失敗しました。電波の良い場所でページを再読み込みしてから、もう一度お試しください。");
+        if ($editBtn) $editBtn.disabled = false;
         return;
       }
-      await withAuthRetry(() => state.db.collection("members").doc(m.id).update(payload));
-      closeSheet();
-      showToast("会員情報を更新しました");
+      try {
+        await withAuthRetry(() => state.db.collection("members").doc(m.id).update(payload));
+        closeSheet();
+        showToast("会員情報を更新しました");
+      } catch (err) {
+        showToast("保存に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
+        if ($editBtn) $editBtn.disabled = false;
+      }
     });
   }
 
@@ -4435,10 +4443,17 @@ Barてきな？ 一同`;
     `;
     openSheet(html);
     document.getElementById("cancelDelete").addEventListener("click", closeSheet);
-    document.getElementById("confirmDelete").addEventListener("click", async () => {
-      await state.db.collection("members").doc(m.id).delete();
-      closeSheet();
-      showToast("削除しました");
+    const $confirmDeleteBtn = document.getElementById("confirmDelete");
+    $confirmDeleteBtn.addEventListener("click", async () => {
+      $confirmDeleteBtn.disabled = true;
+      try {
+        await withAuthRetry(() => state.db.collection("members").doc(m.id).delete());
+        closeSheet();
+        showToast("削除しました");
+      } catch (err) {
+        showToast("削除に失敗しました。もう一度お試しください。");
+        $confirmDeleteBtn.disabled = false;
+      }
     });
   }
 

@@ -2294,6 +2294,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
       `;
     } else if (list.length) {
       html += `<p class="hint" style="margin-bottom:12px;">今月誕生日の会員です。クーポン配布の目安にどうぞ。</p>`;
+      html += birthdayOutreachSectionHtml(list);
     }
 
     if (!list.length) {
@@ -2973,6 +2974,46 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 
 Barてきな？ 一同`;
     return `mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+  // 今月誕生日の会員向けお祝いメール(mailto:リンク)。
+  // 「まとめて送信」はブラウザの仕様上できないため、1人ずつメールアプリを
+  // 開いて内容を確認してから送ってもらう想定(reengageMailtoLinkと同様)。
+  function birthdayMailtoLink(m) {
+    if (!m.email) return null;
+    const subject = "【Barてきな？】お誕生日おめでとうございます🎂";
+    const body = `${m.name || "お客様"}様
+
+お誕生日おめでとうございます！
+Barてきな？一同より、心よりお祝い申し上げます。
+
+ぜひ誕生日月のご来店で、スタッフにひと声かけてください。
+ささやかですが、何かご用意してお待ちしております。
+
+今月中のご来店をお待ちしております。
+
+Barてきな？ 一同`;
+    return `mailto:${encodeURIComponent(m.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }
+  // 今月誕生日の会員一覧(お祝いメール送信用)。休眠会員リストと同じ見た目・操作感で、
+  // 1人ずつ案内メールを開ける。メールアドレス未登録の会員にはボタンを出さない。
+  function birthdayOutreachSectionHtml(list) {
+    return `
+      <ul class="visit-log dormant-list">
+        ${list.map((m) => {
+          const mailLink = birthdayMailtoLink(m);
+          return `
+            <li class="dormant-item">
+              <span>${escapeHtml(m.name || "名前未設定")}</span>
+              <span class="amt">${escapeHtml(birthdayTextOf(m))}</span>
+              ${mailLink
+                ? `<a class="btn btn-ghost dormant-mail-btn" href="${mailLink}">🎂 お祝いメールを送る</a>`
+                : `<span class="dormant-no-email">メール未登録</span>`}
+            </li>
+          `;
+        }).join("")}
+      </ul>
+      <p class="hint" style="margin-bottom:12px;">「お祝いメールを送る」を押すと、名前入りの案内文を入れた状態でメールアプリが開きます。内容を確認してから送信してください。まとめて一括送信はできないため、1人ずつ開いて送る形になります。</p>
+    `;
   }
   // 休眠会員リスト(60日以上来店なし)の表示部分。オーナー専用の「分析」タブと、
   // スタッフも見られる「休眠会員」タブの両方から呼び出す共通関数。

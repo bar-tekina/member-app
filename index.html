@@ -1405,6 +1405,25 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     const spendGap = Math.max(0, next.minSpend - spend);
     return `${next.label}まであと${ptGap}pt、または¥${spendGap.toLocaleString()}の利用`;
   }
+  // VIPまであと少しの常連さん(すでにVIP条件を満たしている会員は対象外)。
+  // ご来店回数(≒スタンプ数)の残りが少ない順に並べ、オーナーが声かけ・
+  // 特典案内をする際の目安に使う。
+  function vipApproachList() {
+    return state.members
+      .map((m) => {
+        const total = lifetimePointsOf(m);
+        const spend = m.totalSpend || 0;
+        if (pureTierIdxOf(total, spend) === 0) return null; // 既にVIP条件を満たしている
+        return {
+          m,
+          visitsLeft: Math.max(0, TIERS[0].min - total),
+          spendLeft: Math.max(0, TIERS[0].minSpend - spend),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.visitsLeft - b.visitsLeft)
+      .slice(0, 10);
+  }
 
   // ---- 会計(レジ)の金額計算 ----
   function registerTotal(reg) {
@@ -3254,6 +3273,7 @@ Barてきな？ 一同`;
     const maxHeatCount = Math.max(1, ...heatGrid.flat().map((c) => c.count));
     const dartsBoard = dartsLeaderboard();
     const attendanceHours = staffAttendanceHours();
+    const vipApproaching = vipApproachList();
 
     return `
       <div class="section-title">月別売上推移(直近6ヶ月)</div>
@@ -3319,6 +3339,14 @@ Barてきな？ 一同`;
         ${barRowHtml("REGULAR", tierCounts.regular, memberCountForPct, tierCounts.regular + "人")}
       </div>
       <p class="hint">GOLD・VIPの比率が増えるほど、常連客を軸にした経営に近づいています。</p>
+
+      <div class="section-title">VIPまであと少しの常連さん</div>
+      ${vipApproaching.length ? `
+        <ul class="visit-log">
+          ${vipApproaching.map((r) => `<li><span>${escapeHtml(r.m.name || "名前未設定")}</span><span class="amt">あと${r.visitsLeft}回${r.spendLeft > 0 ? `(または¥${r.spendLeft.toLocaleString()})` : ""}</span></li>`).join("")}
+        </ul>
+        <p class="hint">ご来店回数が少ない順です。次回ご来店時にひと声かけたり、特典のご案内をするタイミングの目安にお使いください。</p>
+      ` : `<p class="hint">現在VIPに近い会員はいません(すでにVIPの会員は対象外です)。</p>`}
 
       ${staffStats.length ? `
         <div class="section-title">スタッフ別実績(会計時に対応スタッフを選んだ分のみ)</div>

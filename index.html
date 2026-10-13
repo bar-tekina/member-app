@@ -2225,10 +2225,13 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 
     if (state.tab === "new") {
       $main.innerHTML = `
-        <button type="button" class="btn btn-primary" id="startKioskBtn" style="width:100%;margin-bottom:14px;">📱 この画面をお客様に見せて、ご自身で入力してもらう</button>
-        <p class="hint" style="margin:-8px 0 14px;">お客様に端末をお渡ししても、会員登録の画面だけが表示され、他のオーナー専用の情報(会員一覧・売上など)は見えないようになります。</p>
+        <button type="button" class="btn btn-primary" id="showJoinQrBtn" style="width:100%;margin-bottom:8px;">🔳 QRコードを見せて、お客様ご自身のスマホで登録してもらう</button>
+        <button type="button" class="btn btn-ghost" id="startKioskBtn" style="width:100%;margin-bottom:14px;">📱 この端末を見せて、その場で入力してもらう</button>
+        <p class="hint" style="margin:-8px 0 14px;">QRコードならお客様ご自身のスマホで、端末を貸す場合もこの画面だけが表示され、他のオーナー専用の情報(会員一覧・売上など)は見えないようになります。</p>
       ` + newMemberFormHtml();
       bindNewMemberForm($main);
+      const $showJoinQr = document.getElementById("showJoinQrBtn");
+      if ($showJoinQr) $showJoinQr.addEventListener("click", openJoinQrSheet);
       const $startKiosk = document.getElementById("startKioskBtn");
       if ($startKiosk) {
         $startKiosk.addEventListener("click", () => {
@@ -4170,6 +4173,54 @@ Barてきな？ 一同`;
   // #m<id>(スタッフがスキャンする用)とは別に用意している(用途が違うため)。
   function memberCardUrl(m) {
     return location.origin + location.pathname + location.search + "#card" + m.id;
+  }
+  // 新規会員登録フォーム(#join)への公開リンク。お客様ご自身のスマホで
+  // このQRを読み取ってもらえば、オーナー・スタッフの端末を渡さずに
+  // 登録してもらえる。
+  function joinFormUrl() {
+    return location.origin + location.pathname + location.search + "#join";
+  }
+  function openJoinQrSheet() {
+    const url = joinFormUrl();
+    const html = `
+      <div class="sheet-header">
+        <h2>会員登録QR</h2>
+        <button class="sheet-close" id="closeJoinQr" aria-label="閉じる">×</button>
+      </div>
+      <div class="qr-card-wrap">
+        <div id="joinQrCanvas" class="qr-card-canvas"></div>
+      </div>
+      <p class="hint">お客様ご自身のスマホのカメラでこのQRを読み取ると、会員登録フォームが開きます。端末をお渡しする必要がありません。</p>
+      <div class="reg-custom-row">
+        <input type="text" id="joinUrlInput" value="${escapeHtml(url)}" readonly style="flex:1;">
+        <button type="button" class="btn btn-ghost" id="copyJoinUrlBtn">コピー</button>
+      </div>
+    `;
+    openSheet(html);
+    document.getElementById("closeJoinQr").addEventListener("click", closeSheet);
+    const $copyBtn = document.getElementById("copyJoinUrlBtn");
+    if ($copyBtn) {
+      $copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(url);
+          showToast("リンクをコピーしました");
+        } catch (err) {
+          const $input = document.getElementById("joinUrlInput");
+          if ($input) { $input.focus(); $input.select(); $input.setSelectionRange(0, 99999); }
+          showToast("リンクを選択しました。長押しでコピーしてください");
+        }
+      });
+    }
+    const holder = document.getElementById("joinQrCanvas");
+    if (holder && window.QRCode) {
+      try {
+        new QRCode(holder, { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.H });
+      } catch (err) {
+        holder.innerHTML = `<p class="hint">QRコードの生成に失敗しました。</p>`;
+      }
+    } else if (holder) {
+      holder.innerHTML = `<p class="hint">QRコードを読み込めませんでした。通信環境をご確認のうえ、もう一度お試しください。</p>`;
+    }
   }
   function openMemberEntryQRSheet(m) {
     const cardUrl = memberCardUrl(m);

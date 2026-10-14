@@ -4581,11 +4581,25 @@ Barてきな？ 一同`;
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         let code = null;
         try {
+          const qrOpts = { inversionAttempts: "attemptBoth" };
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height) : null;
+          code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, qrOpts) : null;
           if (!code) {
             const enhanced = stretchContrastForQr(ctx.getImageData(0, 0, canvas.width, canvas.height));
-            code = window.jsQR ? window.jsQR(enhanced.data, enhanced.width, enhanced.height) : null;
+            code = window.jsQR ? window.jsQR(enhanced.data, enhanced.width, enhanced.height, qrOpts) : null;
+          }
+          if (!code) {
+            // 遠すぎ/寄りすぎで写真全体にQRが収まっていない場合向けに、
+            // 中央を切り抜いて拡大したものでももう一度だけ試す。
+            const cx = canvas.width / 2, cy = canvas.height / 2;
+            const cropSize = Math.round(Math.min(canvas.width, canvas.height) * 0.6);
+            const cropCanvas = document.createElement("canvas");
+            cropCanvas.width = cropSize;
+            cropCanvas.height = cropSize;
+            const cropCtx = cropCanvas.getContext("2d");
+            cropCtx.drawImage(canvas, cx - cropSize / 2, cy - cropSize / 2, cropSize, cropSize, 0, 0, cropSize, cropSize);
+            const croppedData = cropCtx.getImageData(0, 0, cropSize, cropSize);
+            code = window.jsQR ? window.jsQR(croppedData.data, croppedData.width, croppedData.height, qrOpts) : null;
           }
         } catch (err) {
           code = null;
@@ -4670,7 +4684,7 @@ Barてきな？ 一同`;
             let code = null;
             try {
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              code = window.jsQR(imageData.data, imageData.width, imageData.height);
+              code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
             } catch (err) { code = null; }
             if (code && code.data) {
               const id = parseMemberIdFromQrText(code.data);

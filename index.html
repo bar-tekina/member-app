@@ -3220,7 +3220,7 @@ Barてきな？ 一同`;
           showToast(`${name}さんの${type === "in" ? "出勤" : "退勤"}を記録しました`);
           render();
         } catch (err) {
-          showToast("記録に失敗しました。もう一度お試しください。");
+          showToast("記録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
           root.querySelectorAll("[data-attend-name]").forEach((b) => { b.disabled = false; });
         }
       });

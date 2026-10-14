@@ -3632,6 +3632,32 @@ Barてきな？ 一同`;
         </div>
       </div>
       <div class="section-title">${escapeHtml(formatDateJp(state.resTabDate))}の予約(${dayList.length}件)</div>
+      ${state.resTabAdding ? `
+        <form class="stack" id="resAddForm" style="margin-bottom:16px;">
+          <p class="hint">電話や口頭で受けた予約を、この日付(${escapeHtml(formatDateJp(state.resTabDate))})で直接登録します。</p>
+          <label class="field">ご来店時間 *
+            <input type="time" id="ra-time" name="time" required>
+          </label>
+          <label class="field">人数 *
+            <input type="number" id="ra-party" name="partySize" min="1" value="2" required>
+          </label>
+          <label class="field">お名前 *
+            <input type="text" id="ra-name" name="name" required>
+          </label>
+          <label class="field">電話番号(任意)
+            <input type="tel" id="ra-phone" name="phone">
+          </label>
+          <label class="field">ご要望など(任意)
+            <textarea id="ra-memo" name="memo" rows="2" placeholder="お祝い、苦手な飲み物など"></textarea>
+          </label>
+          <div class="action-row">
+            <button type="submit" class="btn btn-primary">予約を登録する</button>
+            <button type="button" class="btn btn-ghost" id="resAddCancel">キャンセル</button>
+          </div>
+        </form>
+      ` : `
+        <button type="button" class="btn btn-primary" id="resAddOpen" style="width:100%; margin-bottom:16px;">＋ この日に予約を追加(電話予約など)</button>
+      `}
       ${dayList.length ? `
         <ul class="reservation-list">
           ${dayList.map((r) => `
@@ -3660,8 +3686,51 @@ Barてきな？ 一同`;
     if ($prev) $prev.addEventListener("click", () => { state.resTabMonth = addMonths(state.resTabMonth, -1); render(); });
     if ($next) $next.addEventListener("click", () => { state.resTabMonth = addMonths(state.resTabMonth, 1); render(); });
     root.querySelectorAll(".cal-cell[data-date]").forEach((btn) => {
-      btn.addEventListener("click", () => { state.resTabDate = btn.dataset.date; render(); });
+      btn.addEventListener("click", () => { state.resTabDate = btn.dataset.date; state.resTabAdding = false; render(); });
     });
+
+    const $addOpen = root.querySelector("#resAddOpen");
+    if ($addOpen) $addOpen.addEventListener("click", () => { state.resTabAdding = true; render(); });
+    const $addCancel = root.querySelector("#resAddCancel");
+    if ($addCancel) $addCancel.addEventListener("click", () => { state.resTabAdding = false; render(); });
+
+    const $addForm = root.querySelector("#resAddForm");
+    if ($addForm) {
+      $addForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!state.db) { showToast("通信環境をご確認のうえ、もう一度お試しください。"); return; }
+        const fd = new FormData($addForm);
+        const time = (fd.get("time") || "").toString();
+        const partySize = Number(fd.get("partySize")) || 1;
+        const name = (fd.get("name") || "").toString().trim();
+        const phone = (fd.get("phone") || "").toString().trim();
+        const memo = (fd.get("memo") || "").toString().trim();
+        if (!name) { showToast("お名前を入力してください"); return; }
+        const submitBtn = $addForm.querySelector("button[type=submit]");
+        submitBtn.disabled = true;
+        submitBtn.textContent = "登録中…";
+        try {
+          await withAuthRetry(() => state.db.collection("reservations").add({
+            date: state.resTabDate,
+            time,
+            partySize,
+            name,
+            phone,
+            memo,
+            status: "confirmed",
+            createdAt: new Date().toISOString(),
+          }));
+          state.resTabAdding = false;
+          showToast("予約を登録しました");
+          render();
+        } catch (err) {
+          showToast("登録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : ""));
+          submitBtn.disabled = false;
+          submitBtn.textContent = "予約を登録する";
+        }
+      });
+    }
+
     root.querySelectorAll("[data-res-confirm]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         btn.disabled = true;

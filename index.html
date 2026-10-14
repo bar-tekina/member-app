@@ -3650,6 +3650,14 @@ Barてきな？ 一同`;
           <label class="field">ご要望など(任意)
             <textarea id="ra-memo" name="memo" rows="2" placeholder="お祝い、苦手な飲み物など"></textarea>
           </label>
+          ${state.staffList.length ? `
+            <label class="field">受けたスタッフ(任意)
+              <select id="ra-staff" name="staffName">
+                <option value="">選択しない</option>
+                ${state.staffList.map((s) => `<option value="${escapeHtml(s.name || "")}">${escapeHtml(s.name || "名前未設定")}</option>`).join("")}
+              </select>
+            </label>
+          ` : ""}
           <div class="action-row">
             <button type="submit" class="btn btn-primary">予約を登録する</button>
             <button type="button" class="btn btn-ghost" id="resAddCancel">キャンセル</button>
@@ -3669,6 +3677,7 @@ Barてきな？ 一同`;
               <div class="res-name">${escapeHtml(r.name || "名前未設定")}様・${escapeHtml(String(r.partySize || "?"))}名</div>
               <div class="hint">${escapeHtml(r.phone || "")}</div>
               ${r.memo ? `<div class="hint">${escapeHtml(r.memo)}</div>` : ""}
+              ${r.staffName ? `<div class="hint">担当: ${escapeHtml(r.staffName)}</div>` : ""}
               <div class="action-row">
                 ${r.status === "pending" ? `<button type="button" class="btn btn-primary" data-res-confirm="${r.id}">承認する</button>` : ""}
                 ${r.status !== "cancelled" ? `<button type="button" class="btn btn-danger" data-res-cancel="${r.id}">キャンセル</button>` : ""}
@@ -3705,6 +3714,7 @@ Barてきな？ 一同`;
         const name = (fd.get("name") || "").toString().trim();
         const phone = (fd.get("phone") || "").toString().trim();
         const memo = (fd.get("memo") || "").toString().trim();
+        const staffName = (fd.get("staffName") || "").toString().trim();
         if (!name) { showToast("お名前を入力してください"); return; }
         const submitBtn = $addForm.querySelector("button[type=submit]");
         submitBtn.disabled = true;
@@ -3717,6 +3727,7 @@ Barてきな？ 一同`;
             name,
             phone,
             memo,
+            staffName,
             status: "confirmed",
             createdAt: new Date().toISOString(),
           }));

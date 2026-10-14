@@ -4104,7 +4104,11 @@ Barてきな？ 一同`;
             if (addMemberToRegister(member)) showToast(`${member.name || "会員"}さんを読み取りました`);
             render();
           } else {
-            showToast("QRコードを認識できませんでした。もう一度お試しください。");
+            // 写真1枚方式はやり直しのハードルが高いと諦められやすいため、
+            // トーストだけでなく「もう1回撮る」をその場で選べるようにする。
+            showToast("QRコードを認識できませんでした。QRが大きく・明るく写るように、もう一度撮ってみてください。");
+            const $memberSearchRetry = root.querySelector("#regMemberSearch");
+            if ($memberSearchRetry) $memberSearchRetry.focus();
           }
         });
       });
@@ -4563,49 +4567,75 @@ Barてきな？ 一同`;
     return imageData;
   }
 
+  // ---------- ブラウザ内蔵のバーコード検出(対応端末のみ)。jsQRより実写真に強いため優先して試す ----------
+  let barcodeDetectorQrSupported = null; // null=未確認, true/false=確認済み
+  async function detectQrWithBarcodeDetector(canvas) {
+    if (!("BarcodeDetector" in window)) return null;
+    try {
+      if (barcodeDetectorQrSupported === null) {
+        const formats = await window.BarcodeDetector.getSupportedFormats();
+        barcodeDetectorQrSupported = formats.includes("qr_code");
+      }
+      if (!barcodeDetectorQrSupported) return null;
+      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+      const results = await detector.detect(canvas);
+      return results && results.length ? results[0].rawValue : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
   // ---------- 会員証QRの画像を読み取って会員を特定する(写真1枚方式。フォールバック用) ----------
-  // リアルタイムスキャン(openLiveQrScanner)が使えない端末向け。写真1枚しか
-  // 試せないため、暗い/反射した写真でも読めるようコントラスト補正版でも
-  // もう一度だけ試す2段構えにしてある。
+  // リアルタイムスキャン(openLiveQrScanner)が使えない端末(LINEのアプリ内ブラウザ等、
+  // カメラの連続映像を取得できない環境)向け。写真1枚しか試せないため、
+  // 複数の方式・複数の切り抜き方でできる限り認識率を上げている。
+  // 1. 対応端末ではブラウザ内蔵のBarcodeDetector(実写真に強い)をまず試す
+  // 2. 元解像度に近いサイズでjsQR
+  // 3. 明暗差を最大まで引き伸ばした版でjsQR(反射・暗所向け)
+  // 4. 中央を切り抜いて拡大した版でjsQR(QRが写真の隅に小さく写っている場合向け)
   function decodeMemberQrFile(file, callback) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
-      img.onload = () => {
-        const maxDim = 1600;
+      img.onload = async () => {
+        const maxDim = 2200;
         const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
         const canvas = document.createElement("canvas");
         canvas.width = Math.round(img.width * scale);
         canvas.height = Math.round(img.height * scale);
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        let code = null;
-        try {
-          const qrOpts = { inversionAttempts: "attemptBoth" };
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, qrOpts) : null;
-          if (!code) {
-            const enhanced = stretchContrastForQr(ctx.getImageData(0, 0, canvas.width, canvas.height));
-            code = window.jsQR ? window.jsQR(enhanced.data, enhanced.width, enhanced.height, qrOpts) : null;
-          }
-          if (!code) {
-            // 遠すぎ/寄りすぎで写真全体にQRが収まっていない場合向けに、
-            // 中央を切り抜いて拡大したものでももう一度だけ試す。
-            const cx = canvas.width / 2, cy = canvas.height / 2;
-            const cropSize = Math.round(Math.min(canvas.width, canvas.height) * 0.6);
-            const cropCanvas = document.createElement("canvas");
-            cropCanvas.width = cropSize;
-            cropCanvas.height = cropSize;
-            const cropCtx = cropCanvas.getContext("2d");
-            cropCtx.drawImage(canvas, cx - cropSize / 2, cy - cropSize / 2, cropSize, cropSize, 0, 0, cropSize, cropSize);
-            const croppedData = cropCtx.getImageData(0, 0, cropSize, cropSize);
-            code = window.jsQR ? window.jsQR(croppedData.data, croppedData.width, croppedData.height, qrOpts) : null;
-          }
-        } catch (err) {
-          code = null;
+
+        let rawText = await detectQrWithBarcodeDetector(canvas);
+
+        if (!rawText) {
+          try {
+            const qrOpts = { inversionAttempts: "attemptBoth" };
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, qrOpts) : null;
+            if (!code) {
+              const enhanced = stretchContrastForQr(ctx.getImageData(0, 0, canvas.width, canvas.height));
+              code = window.jsQR ? window.jsQR(enhanced.data, enhanced.width, enhanced.height, qrOpts) : null;
+            }
+            if (!code) {
+              // 遠すぎ/寄りすぎで写真全体にQRが収まっていない場合向けに、
+              // 中央を切り抜いて拡大したものでももう一度だけ試す。
+              const cx = canvas.width / 2, cy = canvas.height / 2;
+              const cropSize = Math.round(Math.min(canvas.width, canvas.height) * 0.6);
+              const cropCanvas = document.createElement("canvas");
+              cropCanvas.width = cropSize;
+              cropCanvas.height = cropSize;
+              const cropCtx = cropCanvas.getContext("2d");
+              cropCtx.drawImage(canvas, cx - cropSize / 2, cy - cropSize / 2, cropSize, cropSize, 0, 0, cropSize, cropSize);
+              const croppedData = cropCtx.getImageData(0, 0, cropSize, cropSize);
+              code = window.jsQR ? window.jsQR(croppedData.data, croppedData.width, croppedData.height, qrOpts) : null;
+            }
+            if (code && code.data) rawText = code.data;
+          } catch (err) { /* 下のcallback(null)に委ねる */ }
         }
-        if (!code || !code.data) { callback(null); return; }
-        const id = parseMemberIdFromQrText(code.data);
+
+        if (!rawText) { callback(null); return; }
+        const id = parseMemberIdFromQrText(rawText);
         const member = id ? state.members.find((x) => x.id === id) : null;
         callback(member || null);
       };

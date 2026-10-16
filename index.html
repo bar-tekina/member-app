@@ -1906,6 +1906,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         <div id="staffQrCanvas" class="qr-card-canvas"></div>
       </div>
       <p class="hint">スタッフはこのコードを一度入力する(またはこのQRコードを読み取る)と、その端末では次回から自動で会計画面に入れます。QRコードは常に現在のコードと連動しているので、保存せずこの画面を都度開いて使ってください。</p>
+      <button type="button" class="btn btn-ghost" id="copyStaffCodeBtn" style="width:100%;">🔎 QRが読み取れない場合は、この4桁コードをコピーしてLINE等で送る</button>
       <button class="btn btn-danger" id="regenStaffCode" style="width:100%;">コードを再発行する(退職・交代したスタッフを締め出す)</button>
       <p class="hint">再発行すると、これまでのコード・QRコードを使っていた端末は全てアクセスできなくなり、上のQRコードは自動的に新しいコードのものに切り替わります。</p>
 
@@ -1919,6 +1920,20 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     openSheet(html);
     renderStaffQR(state.staffCode);
     document.getElementById("closeStaffCode").addEventListener("click", closeSheet);
+    const $copyStaffCodeBtn = document.getElementById("copyStaffCodeBtn");
+    if ($copyStaffCodeBtn) {
+      $copyStaffCodeBtn.addEventListener("click", async () => {
+        // 再発行された場合に備え、クリック時点で画面に表示されている最新の
+        // コードを読み取る(クロージャに固定された古いcode変数は使わない)。
+        const currentCode = document.querySelector(".staffcode-display").textContent || "";
+        try {
+          await navigator.clipboard.writeText(currentCode);
+          showToast("コードをコピーしました: " + currentCode);
+        } catch (err) {
+          showToast("コードをコピーできませんでした。手入力で「" + currentCode + "」と伝えてください");
+        }
+      });
+    }
     document.getElementById("regenStaffCode").addEventListener("click", async () => {
       try {
         const newCode = await regenerateStaffCode();
@@ -4827,6 +4842,7 @@ Barてきな？ 一同`;
         <input type="text" id="joinUrlInput" value="${escapeHtml(url)}" readonly style="flex:1;">
         <button type="button" class="btn btn-ghost" id="copyJoinUrlBtn">コピー</button>
       </div>
+      <button type="button" class="btn btn-ghost" id="joinQrManualBtn" style="width:100%;margin-top:14px;">🔎 QRが読み取れない場合は、この端末で直接入力してもらう</button>
     `;
     openSheet(html);
     document.getElementById("closeJoinQr").addEventListener("click", closeSheet);
@@ -4841,6 +4857,20 @@ Barてきな？ 一同`;
           if ($input) { $input.focus(); $input.select(); $input.setSelectionRange(0, 99999); }
           showToast("リンクを選択しました。長押しでコピーしてください");
         }
+      });
+    }
+    // QRが読み取れない時に、画面を切り替えるだけでキオスクモード(この端末を
+    // お客様に見せて、その場でスタッフ用フォームに直接入力してもらう)へ
+    // 即座に逃げられるようにする。新規登録タブにも同じボタンはあるが、
+    // QR画面を開いたまま困っているスタッフが、タブに戻らず一歩で遷移できる。
+    const $joinManualBtn = document.getElementById("joinQrManualBtn");
+    if ($joinManualBtn) {
+      $joinManualBtn.addEventListener("click", () => {
+        closeSheet();
+        state.kioskMode = true;
+        state.kioskCardMemberId = null;
+        state.kioskCardMemberFallback = null;
+        render();
       });
     }
     const holder = document.getElementById("joinQrCanvas");

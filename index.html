@@ -915,6 +915,41 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ---------- 新しいバージョンの案内バナー ---------- */
+/* スマホのホーム画面アプリは長時間開いたままになりやすく、修正を配信しても
+   古いバージョンのまま使われ続けてしまうことがある。更新を検知したら
+   画面上部に常時表示のバナーで知らせ、タップ1つで最新版に切り替えられる
+   ようにする(自動では切り替えない: 入力中のフォームなどを失わないため)。 */
+.update-banner {
+  position: fixed;
+  top: env(safe-area-inset-top, 0px);
+  left: 0; right: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: linear-gradient(135deg, var(--gold-bright), var(--gold));
+  color: #2a1a04;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 9px 14px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  transform: translateY(-110%);
+  transition: transform 0.2s;
+}
+.update-banner.show { transform: translateY(0); }
+.update-banner .btn-tiny {
+  background: #2a1a04;
+  color: #ffce63;
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
 }
@@ -1026,6 +1061,9 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 </style>
 </head>
 <body>
+<div class="update-banner" id="updateBanner" hidden>
+  新しいバージョンがあります <span class="btn-tiny">タップして更新</span>
+</div>
 <div id="app">
   <header class="top">
     <div class="brand-row">
@@ -1083,6 +1121,39 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 <script>
 (function () {
   "use strict";
+
+  // ---- バージョン更新の検知 ----
+  // スタッフ・オーナーの端末はホーム画面に追加したPWAとして長時間
+  // 開きっぱなしで使われることが多く、コード側に修正を配信しても、
+  // 端末側は古いバージョンのJSを読み込んだまま動き続けてしまうことがある。
+  // このビルドIDを更新のたびに変え、配信中の index.html を定期的に
+  // (キャッシュを無視して)取得してIDを比較することで、新しいバージョンが
+  // 出ていることを画面上部のバナーで知らせる。自動では切り替えず、
+  // タップした時だけ再読み込みする(入力中の内容を失わないため)。
+  const BUILD_ID = "2026-10-17-01";
+  (function watchForNewVersion() {
+    const $banner = document.getElementById("updateBanner");
+    if (!$banner) return;
+    let checking = false;
+    async function check() {
+      if (checking || document.visibilityState !== "visible") return;
+      checking = true;
+      try {
+        const res = await fetch(location.pathname + location.search, { cache: "no-store" });
+        const text = await res.text();
+        const m = /BUILD_ID = "([^"]+)"/.exec(text);
+        if (m && m[1] !== BUILD_ID) {
+          $banner.hidden = false;
+          requestAnimationFrame(() => $banner.classList.add("show"));
+        }
+      } catch (err) { /* オフライン等。次回のチェックに任せる */ }
+      checking = false;
+    }
+    $banner.addEventListener("click", () => { location.reload(); });
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") check(); });
+    setTimeout(check, 15000);
+    setInterval(check, 20 * 60 * 1000);
+  })();
 
   // ---- Firebase 初期化 ----
   // このアプリは GitHub Pages で配信される静的サイト(Claude Artifactではない)ため、
@@ -1703,7 +1774,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   // 配り直す必要がある(この画面を開けばいつでも最新のQRが見られる)。
   async function regenerateStaffCode() {
     const newCode = String(Math.floor(1000 + Math.random() * 9000));
-    await state.db.collection("settings").doc("staffAccess").set({ code: newCode, updatedAt: Date.now() });
+    await withAuthRetry(() => state.db.collection("settings").doc("staffAccess").set({ code: newCode, updatedAt: Date.now() }));
     return newCode;
   }
   function staffListItemsHtml(list) {
@@ -1742,7 +1813,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         const name = btn.dataset.staffName || "このスタッフ";
         if (!window.confirm(`${name}さんを削除します。アクセスコードは全スタッフ共通のため、同時に新しいコードへ自動で切り替わり、今使われている古いコード・QRコードは全て使えなくなります(${name}さん以外の在籍スタッフも含みます)。よろしいですか?`)) return;
         try {
-          await state.db.collection("staff").doc(id).delete();
+          await withAuthRetry(() => state.db.collection("staff").doc(id).delete());
           const newCode = await regenerateStaffCode();
           const $display = document.querySelector(".staffcode-display");
           if ($display) $display.textContent = newCode;
@@ -2063,7 +2134,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         payload.customMenu = draftCustom.map((it) => ({ key: it.key, label: it.label, price: it.price }));
 
         try {
-          await state.db.collection("settings").doc("pricing").set(payload);
+          await withAuthRetry(() => state.db.collection("settings").doc("pricing").set(payload));
           closeSheet();
           showToast("料金を更新しました");
         } catch (err) {
@@ -4458,7 +4529,7 @@ Barてきな？ 一同`;
       const fd = new FormData(e.target);
       const amount = fd.get("amount") ? Number(fd.get("amount")) : 0;
       try {
-        await recordVisit(m, amount);
+        await withAuthRetry(() => recordVisit(m, amount));
         closeSheet();
         showToast(`来店を記録しました(+1スタンプ)`);
       } catch (err) {
@@ -4472,7 +4543,7 @@ Barてきな？ 一同`;
       redeemBtn.addEventListener("click", async () => {
         redeemBtn.disabled = true;
         try {
-          await redeemReward(m);
+          await withAuthRetry(() => redeemReward(m));
           closeSheet();
           showToast("特典利用として記録しました");
         } catch (err) {
@@ -4502,7 +4573,7 @@ Barてきな？ 一同`;
       undoVisitBtn.addEventListener("click", async () => {
         undoVisitBtn.disabled = true;
         try {
-          await undoLastVisit(m);
+          await withAuthRetry(() => undoLastVisit(m));
           closeSheet();
           showToast("直前の来店記録を取り消しました");
         } catch (err) {

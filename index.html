@@ -4113,6 +4113,11 @@ Barてきな？ 一同`;
                 : "カメラでの自動読み取りが使えないため、写真を1枚撮って読み取ります。";
             showToast(msg);
             $qrFile.click();
+          },
+          () => {
+            showToast("手入力で検索してください");
+            const $memberSearchManual = root.querySelector("#regMemberSearch");
+            if ($memberSearchManual) $memberSearchManual.focus();
           }
         );
       });
@@ -4689,7 +4694,11 @@ Barてきな？ 一同`;
       qrScannerStream = null;
     }
   }
-  function openLiveQrScanner(onFound, onUnavailable) {
+  // onManualEntry: 「手入力で検索する」ボタン用のコールバック(省略可)。
+  // カメラが許可待ちのまま固まる・権限ダイアログが出ない等、onUnavailableすら
+  // 呼ばれない端末があるため、待たずにいつでも手入力へ逃げられるボタンを
+  // スキャン画面自体に常時出しておく(「読み取れない時は手入力で」の対応)。
+  function openLiveQrScanner(onFound, onUnavailable, onManualEntry) {
     const myToken = ++qrScannerToken;
     const html = `
       <div class="sheet-header">
@@ -4701,11 +4710,20 @@ Barてきな？ 一同`;
         <div class="qr-scan-frame"></div>
       </div>
       <p class="hint" id="qrScanHint">お客様の会員証QRにカメラをかざしてください。自動で読み取ります。</p>
+      <button type="button" class="btn btn-ghost" id="qrScanManualBtn" style="width:100%;margin-top:4px;">🔎 読み取れない場合は手入力で検索する</button>
     `;
     openSheet(html);
     const $video = document.getElementById("qrScanVideo");
     const $hint = document.getElementById("qrScanHint");
     document.getElementById("closeQrScan").addEventListener("click", closeSheet);
+    const $manualBtn = document.getElementById("qrScanManualBtn");
+    if ($manualBtn) {
+      $manualBtn.addEventListener("click", () => {
+        stopQrScanner();
+        closeSheet();
+        if (onManualEntry) onManualEntry();
+      });
+    }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.jsQR) {
       closeSheet();

@@ -5489,6 +5489,24 @@ Barてきな？ 一同`;
     await ensureAnonymousAuth();
     state.db = db;
 
+    // ---- 画面がロック・バックグラウンドから復帰した時の再接続対策 ----
+    // iPhoneなどで長時間アプリを閉じたり画面をロックしたままにしていると、
+    // Firestoreのリアルタイム同期(onSnapshot)が止まったまま再接続されず、
+    // 「他のスタッフ・お客様が新しく登録した会員が検索に出てこない」状態に
+    // なることがある(アプリ側の不具合ではなく、スマホのブラウザが通信を
+    // 一時停止する挙動によるもの)。画面に戻ってきたタイミングで明示的に
+    // ネットワークを繋ぎ直すことで、データを最新の状態に復帰させる。
+    if (!state.networkResumeBound) {
+      state.networkResumeBound = true;
+      const resumeSync = () => {
+        if (!state.db) return;
+        state.db.disableNetwork().catch(() => {}).then(() => state.db.enableNetwork().catch(() => {}));
+      };
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") resumeSync(); });
+      window.addEventListener("pageshow", resumeSync);
+      window.addEventListener("online", resumeSync);
+    }
+
     // ---- アンケート(#feedback)・予約(#reserve)は送信専用ページ ----
     // 送信に必要な書き込み権限だけがあればよく、会員一覧などの読み込みは
     // 不要なため、他のコレクションは一切購読しない。

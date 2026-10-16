@@ -1645,8 +1645,29 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     });
   }
 
+  // ---- 共有URL生成の土台 ----
+  // QRコード(スタッフコード・会員証・会員登録など)に埋め込むURLは、すべて
+  // location.pathname をもとに組み立てている。ところがブックマークや
+  // ホーム画面追加の経緯によっては、末尾のスラッシュが無い状態
+  // (例: https://.../member-app ではなく https://.../member-app)で
+  // pathname が保持されてしまうことがある。この状態でQRを発行すると、
+  // URLとしては動くはずでも、一部のQRリーダーアプリ(リダイレクトを
+  // 自動で追わないもの)では「404 File not found」になってしまう。
+  // ここで必ずディレクトリ形式(末尾スラッシュあり)に正規化してから
+  // 使うことで、この種の不具合を避ける。
+  function appBaseUrl() {
+    let path = location.pathname;
+    if (!path.endsWith("/")) {
+      const lastSlash = path.lastIndexOf("/");
+      const lastSegment = path.slice(lastSlash + 1);
+      // 末尾が index.html のようにファイル名の場合はそのディレクトリ部分だけを使い、
+      // ディレクトリ名のつもりでスラッシュが抜けているだけの場合はスラッシュを補う。
+      path = lastSegment.includes(".") ? path.slice(0, lastSlash + 1) : path + "/";
+    }
+    return location.origin + path;
+  }
   function staffEntryUrl(code) {
-    return location.origin + location.pathname + location.search + "#" + code;
+    return appBaseUrl() + location.search + "#" + code;
   }
   function renderStaffQR(code) {
     const holder = document.getElementById("staffQrCanvas");
@@ -4760,18 +4781,18 @@ Barてきな？ 一同`;
 
   // ---------- 会員の入店QR(スキャンで会計対象に自動セット) ----------
   function memberEntryUrl(m) {
-    return location.origin + location.pathname + location.search + "#m" + m.id;
+    return appBaseUrl() + location.search + "#m" + m.id;
   }
   // お客様ご自身のスマホで、いつでもこの会員証(QR)を開き直せる公開リンク。
   // #m<id>(スタッフがスキャンする用)とは別に用意している(用途が違うため)。
   function memberCardUrl(m) {
-    return location.origin + location.pathname + location.search + "#card" + m.id;
+    return appBaseUrl() + location.search + "#card" + m.id;
   }
   // 新規会員登録フォーム(#join)への公開リンク。お客様ご自身のスマホで
   // このQRを読み取ってもらえば、オーナー・スタッフの端末を渡さずに
   // 登録してもらえる。
   function joinFormUrl() {
-    return location.origin + location.pathname + location.search + "#join";
+    return appBaseUrl() + location.search + "#join";
   }
   function openJoinQrSheet() {
     const url = joinFormUrl();

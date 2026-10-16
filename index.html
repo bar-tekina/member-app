@@ -640,8 +640,11 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; 
   background: var(--bg-elev-2);
   border: 1px solid var(--line);
   border-radius: 10px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 46vh;
 }
+.referrer-results .rr-more { padding: 8px 12px; font-size: 11.5px; color: var(--fg-faint); text-align: center; }
 .referrer-results .rr-item {
   padding: 10px 12px;
   font-size: 13.5px;
@@ -2611,9 +2614,10 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
     $refSearch.addEventListener("input", () => {
       const q = $refSearch.value.trim().toLowerCase();
       if (!q) { $refResults.hidden = true; $refResults.innerHTML = ""; return; }
-      const matches = state.members.filter((m) =>
+      const allMatches = state.members.filter((m) =>
         (m.name || "").toLowerCase().includes(q) || normalizePhone(m.phone).includes(normalizePhone(q))
-      ).slice(0, 6);
+      );
+      const matches = allMatches.slice(0, 30);
       if (!matches.length) {
         $refResults.innerHTML = `<div class="rr-empty">該当する会員が見つかりません</div>`;
       } else {
@@ -2622,7 +2626,9 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
             <span>${escapeHtml(m.name || "名前未設定")}</span>
             <span class="rr-sub">${escapeHtml(m.phone || "")}</span>
           </div>
-        `).join("");
+        `).join("") + (allMatches.length > matches.length
+          ? `<div class="rr-more">他に${allMatches.length - matches.length}件あります。続けて入力すると絞り込めます</div>`
+          : "");
         $refResults.querySelectorAll(".rr-item").forEach((el) => {
           el.addEventListener("click", () => {
             const member = state.members.find((x) => x.id === el.dataset.id);
@@ -4170,9 +4176,10 @@ Barてきな？ 一同`;
         reg.memberQuery = e.target.value;
         const q = reg.memberQuery.trim().toLowerCase();
         if (!q) { $memberResults.hidden = true; $memberResults.innerHTML = ""; return; }
-        const matches = state.members.filter((m) =>
+        const allMatches = state.members.filter((m) =>
           (m.name || "").toLowerCase().includes(q) || normalizePhone(m.phone).includes(normalizePhone(q))
-        ).slice(0, 6);
+        );
+        const matches = allMatches.slice(0, 30);
         if (!matches.length) {
           $memberResults.innerHTML = `<div class="rr-empty">該当する会員が見つかりません</div>`;
         } else {
@@ -4181,7 +4188,9 @@ Barてきな？ 一同`;
               <span>${escapeHtml(m.name || "名前未設定")}</span>
               <span class="rr-sub">${escapeHtml(m.phone || "")}</span>
             </div>
-          `).join("");
+          `).join("") + (allMatches.length > matches.length
+            ? `<div class="rr-more">他に${allMatches.length - matches.length}件あります。続けて入力すると絞り込めます</div>`
+            : "");
           $memberResults.querySelectorAll(".rr-item").forEach((el) => {
             el.addEventListener("click", () => {
               const member = state.members.find((x) => x.id === el.dataset.id);

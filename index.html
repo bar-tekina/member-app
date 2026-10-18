@@ -1143,7 +1143,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   // (キャッシュを無視して)取得してIDを比較することで、新しいバージョンが
   // 出ていることを画面上部のバナーで知らせる。自動では切り替えず、
   // タップした時だけ再読み込みする(入力中の内容を失わないため)。
-  const BUILD_ID = "2026-10-18-01";
+  const BUILD_ID = "2026-10-18-02";
   (function watchForNewVersion() {
     const $banner = document.getElementById("updateBanner");
     if (!$banner) return;
@@ -1259,7 +1259,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 
   const state = {
     db: null, ready: false, members: [], tab: "register", search: "", register: createEmptyRegister(),
-    unlocked: false, staffCode: null, staffGranted: false, staffGateChecked: false,
+    unlocked: false, staffCode: null, staffCodeUpdatedAt: null, staffGranted: false, staffGateChecked: false,
     pendingEntryMemberId: null, publicJoinMode: false, publicJoinDone: false,
     publicFeedbackMode: false,
     publicCheckinMode: false,
@@ -1991,10 +1991,11 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
         <button class="sheet-close" id="closeStaffCode" aria-label="閉じる">×</button>
       </div>
       <div class="staffcode-display">${escapeHtml(code)}</div>
+      ${state.staffCodeUpdatedAt ? `<p class="hint" style="margin-top:-6px;text-align:center;">最終更新: ${escapeHtml(new Date(state.staffCodeUpdatedAt).toLocaleString("ja-JP"))}</p>` : ""}
       <div class="qr-card-wrap">
         <div id="staffQrCanvas" class="qr-card-canvas"></div>
       </div>
-      <p class="hint">スタッフはこのコードを一度入力する(またはこのQRコードを読み取る)と、その端末では次回から自動で会計画面に入れます。QRコードは常に現在のコードと連動しているので、保存せずこの画面を都度開いて使ってください。</p>
+      <p class="hint">スタッフはこのコードを一度入力する(またはこのQRコードを読み取る)と、その端末では次回から自動で会計画面に入れます。QRコードは常に現在のコードと連動しているので、保存せずこの画面を都度開いて使ってください。このコードは「コードを再発行する」を押さない限り変わりません。</p>
       <button type="button" class="btn btn-ghost" id="copyStaffCodeBtn" style="width:100%;">🔎 QRが読み取れない場合は、この4桁コードをコピーしてLINE等で送る</button>
       <button class="btn btn-danger" id="regenStaffCode" style="width:100%;">コードを再発行する(退職・交代したスタッフを締め出す)</button>
       <p class="hint">再発行すると、これまでのコード・QRコードを使っていた端末は全てアクセスできなくなり、上のQRコードは自動的に新しいコードのものに切り替わります。</p>
@@ -5733,15 +5734,33 @@ Barてきな？ 一同`;
       },
       () => { state.attendanceReady = true; render(); }
     );
+    // ---- スタッフコードの初回自動発行(トランザクションで安全に) ----
+    // 以前は下のonSnapshotの中で「コードが無ければその場で新規発行」していたが、
+    // これは「まだ無い」と読めた端末が複数あった場合(起動直後の読み込みタイミングが
+    // 重なった場合など)に、それぞれが別々のランダムなコードを生成して上書きし合い、
+    // オーナーが何も操作していないのにコードが何度も変わって見える不具合の原因に
+    // なり得た。runTransaction()でコミット直前にもう一度ドキュメントを読み直し、
+    // 「本当に存在しない場合だけ」書き込むようにすることで、複数端末が同時に
+    // 初回発行を試みても、実際に書き込まれるコードは1つだけになるようにする。
+    (async () => {
+      try {
+        const ref = state.db.collection("settings").doc("staffAccess");
+        await state.db.runTransaction(async (tx) => {
+          const snap = await tx.get(ref);
+          const data = snap.exists ? snap.data() : null;
+          if (!data || !data.code) {
+            const code = String(Math.floor(1000 + Math.random() * 9000));
+            tx.set(ref, { code, updatedAt: Date.now() });
+          }
+        });
+      } catch (err) { /* 失敗しても下のonSnapshotが追って同期するので、ここでは無視してよい */ }
+    })();
     state.db.collection("settings").doc("staffAccess").onSnapshot(
       (doc) => {
         const data = doc && doc.exists ? doc.data() : null;
         if (data && data.code) {
           state.staffCode = String(data.code);
-        } else if (!state.staffGateChecked) {
-          // まだコードが無ければ初回に自動で発行する
-          const code = String(Math.floor(1000 + Math.random() * 9000));
-          state.db.collection("settings").doc("staffAccess").set({ code, updatedAt: Date.now() }).catch(() => {});
+          state.staffCodeUpdatedAt = data.updatedAt || null;
         }
         state.staffGateChecked = true;
         evaluateStaffAccess();

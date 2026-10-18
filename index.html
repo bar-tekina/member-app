@@ -827,6 +827,19 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
 .staff-card-actions { display: flex; gap: 8px; justify-content: flex-end; border-top: 1px dashed var(--line); padding-top: 8px; }
 .staff-card-actions .btn { padding: 5px 14px; font-size: 12px; }
 .staff-card-delete { color: var(--danger-bright); border-color: var(--danger); }
+.btn-link-small {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--fg-faint);
+  font-family: inherit;
+  font-size: 10.5px;
+  text-decoration: underline;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.btn-link-small:active { color: var(--pink-bright); }
 
 /* 来店確認(入口QR。#checkin) */
 .checkin-card { max-width: 420px; margin: 18vh auto 0; text-align: center; padding: 32px 22px; background: var(--bg-elev); border: 1px solid var(--line); border-radius: 18px; }
@@ -1130,7 +1143,7 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   // (キャッシュを無視して)取得してIDを比較することで、新しいバージョンが
   // 出ていることを画面上部のバナーで知らせる。自動では切り替えず、
   // タップした時だけ再読み込みする(入力中の内容を失わないため)。
-  const BUILD_ID = "2026-10-17-01";
+  const BUILD_ID = "2026-10-18-01";
   (function watchForNewVersion() {
     const $banner = document.getElementById("updateBanner");
     if (!$banner) return;
@@ -1371,7 +1384,9 @@ ul.staff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-dir
   // 自動で書き込む)、起動後は state.db の onSnapshot で同期した値を使う。
   let OWNER_PIN = "6188";
   const LOCK_STORAGE_KEY = "btekina_owner_unlocked";
-  const RESTRICTED_TABS = ["list", "new", "birthday", "sales", "analysis"];
+  // 休眠会員タブは会員一覧と同じ個人情報(氏名・電話番号など)を表示するため、
+  // 会員一覧(list)と同様にオーナー専用に制限する(以前は制限から漏れていた)。
+  const RESTRICTED_TABS = ["list", "new", "birthday", "dormant", "sales", "analysis"];
   function readStoredUnlock() {
     try { return localStorage.getItem(LOCK_STORAGE_KEY) === "1"; } catch (err) { return false; }
   }
@@ -3268,6 +3283,15 @@ Barてきな？ 一同`;
     const last = latestAttendanceOf(name);
     return !!(last && last.type === "in");
   }
+  // 押し間違い対策: 直前の出勤・退勤の記録を1件だけ取り消す。
+  // これまでは誤って記録してしまっても取り消す手段がアプリ内になく、
+  // 「オーナーが分析タブから確認・修正できます」という案内が事実と違っていた
+  // (分析タブは合計時間を見るだけで、個別記録の修正機能が無かった)。
+  async function undoLastAttendance(name) {
+    const last = latestAttendanceOf(name);
+    if (!last || !last.id) return;
+    await state.db.collection("attendance").doc(last.id).delete();
+  }
   async function recordAttendance(staffName, type) {
     const now = new Date();
     await state.db.collection("attendance").add({
@@ -3296,7 +3320,8 @@ Barてきな？ 一同`;
         <ul class="staff-list">
           ${staff.map((s) => {
             const name = s.name || "名前未設定";
-            const onDuty = isOnDutyNow(name);
+            const last = latestAttendanceOf(name);
+            const onDuty = !!(last && last.type === "in");
             return `
               <li class="staff-card">
                 <div class="staff-card-top">
@@ -3307,11 +3332,12 @@ Barてきな？ 一同`;
                   <button type="button" class="btn ${onDuty ? "btn-ghost" : "btn-primary"}" data-attend-name="${escapeHtml(name)}" data-attend-type="in" ${onDuty ? "disabled" : ""}>出勤する</button>
                   <button type="button" class="btn ${onDuty ? "btn-primary" : "btn-ghost"}" data-attend-name="${escapeHtml(name)}" data-attend-type="out" ${onDuty ? "" : "disabled"}>退勤する</button>
                 </div>
+                ${last ? `<button type="button" class="btn-link-small" data-undo-attend-name="${escapeHtml(name)}">直前の記録(${last.type === "in" ? "出勤" : "退勤"}・${escapeHtml(last.time || "")})を間違えた場合はここを押して取り消す</button>` : ""}
               </li>
             `;
           }).join("")}
         </ul>
-        <p class="hint">自分の名前の「出勤する」「退勤する」を押すだけで記録できます。間違えて押した場合は、下の「本日の記録」はオーナーが分析タブから確認・修正できます。</p>
+        <p class="hint">自分の名前の「出勤する」「退勤する」を押すだけで記録できます。間違えて押した場合は、その名前の下にある取り消しリンクからすぐに直せます。</p>
       ` : `<p class="hint">スタッフが登録されていません。🔑ボタンからスタッフを登録すると、ここに表示されます。</p>`}
 
       <div class="section-title">本日の記録</div>
@@ -3335,6 +3361,23 @@ Barてきな？ 一同`;
         } catch (err) {
           showToast("記録に失敗しました。もう一度お試しください。" + (err && err.message ? "(" + err.message + ")" : "") + " [" + authDebugInfo() + "]");
           root.querySelectorAll("[data-attend-name]").forEach((b) => { b.disabled = false; });
+        }
+      });
+    });
+    root.querySelectorAll("[data-undo-attend-name]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const name = btn.dataset.undoAttendName;
+        const last = latestAttendanceOf(name);
+        if (!last) return;
+        if (!window.confirm(`${name}さんの直前の記録(${last.type === "in" ? "出勤" : "退勤"}・${last.time || ""})を取り消します。よろしいですか?`)) return;
+        btn.disabled = true;
+        try {
+          await withAuthRetry(() => undoLastAttendance(name));
+          showToast(`${name}さんの記録を取り消しました`);
+          render();
+        } catch (err) {
+          showToast("取り消しに失敗しました。もう一度お試しください。");
+          btn.disabled = false;
         }
       });
     });

@@ -12,6 +12,58 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Barてきな？STAFF">
 <meta name="mobile-web-app-capable" content="yes">
+<script>
+(function () {
+  // 不具合修正: お客様向けページ(#join・#card<id>・#checkin・#feedback・#reserve)を
+  // ホーム画面に追加すると、ブラウザは manifest.webmanifest の start_url(".")を
+  // もとにアプリを起動するため、ハッシュが失われて常に「スタッフ専用アプリ」の
+  // 画面(スタッフコード入力)に戻ってしまっていた。
+  // (お客様が会員登録ページをホーム画面に追加→後日アイコンから開くとスタッフ
+  // コード入力画面が出る、という不具合の原因)
+  // ここでお客様向けハッシュで開かれた場合だけ manifest とタイトルを動的に差し替え、
+  // start_url にそのハッシュを含めることで、ホーム画面のアイコンからも
+  // 正しいお客様向け画面がそのまま開くようにする。
+  var hash = (location.hash || "").replace(/^#/, "");
+  var PUBLIC_LABELS = { join: "会員登録", checkin: "来店確認", feedback: "アンケート", reserve: "予約" };
+  var label = PUBLIC_LABELS[hash] || null;
+  var startHash = label ? hash : null;
+  if (!label) {
+    var m = /^card([a-zA-Z0-9_-]{4,})$/.exec(hash);
+    if (m) { label = "会員証"; startHash = hash; }
+  }
+  if (!label) return; // スタッフ・オーナー向けのURLはこれまで通り
+
+  var title = "Barてきな？ " + label;
+  document.title = title;
+  var appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if (appleTitleMeta) appleTitleMeta.setAttribute("content", "Barてきな？");
+
+  var manifest = {
+    name: title,
+    short_name: "Barてきな？",
+    start_url: "./#" + startHash,
+    display: "standalone",
+    background_color: "#0a0810",
+    theme_color: "#0a0810",
+    icons: [
+      { src: "icons/icon-192-v5.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "icons/icon-512-v5.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "icons/icon-192-v5.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+      { src: "icons/icon-512-v5.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+    ]
+  };
+  // icons の相対パスは Blob URL(manifest.webmanifestとは別オリジン扱い)になっても
+  // 正しく解決できるよう、絶対URLに変換しておく。
+  manifest.icons.forEach(function (ic) { ic.src = new URL(ic.src, document.baseURI).href; });
+
+  try {
+    var blob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
+    var url = URL.createObjectURL(blob);
+    var link = document.querySelector('link[rel="manifest"]');
+    if (link) link.setAttribute("href", url);
+  } catch (err) { /* 失敗しても通常のmanifestのまま表示は続行する */ }
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
